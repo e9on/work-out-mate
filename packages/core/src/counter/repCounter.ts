@@ -7,8 +7,8 @@ export type RepConfig = {
   turn: number;
   /** 다시 이 값을 넘어 돌아오면 1회 확정 (enter와 히스테리시스) */
   exit: number;
-  /** 나감·돌아옴 각 구간 최소 시간(ms) */
-  minPhaseMs: number;
+  /** 반복 전체(startT→endT) 최소 시간(ms). 구간별 최소 시간은 두지 않는다 */
+  minRepMs: number;
   /** 신호 null이 이만큼 이어지면 진행 중 반복을 버림(ms) */
   pauseAfterMs: number;
 };
@@ -93,7 +93,7 @@ export class RepCounter {
         this.inner = 'rest';
         const outMs = this.turnT - this.startT;
         const backMs = t - this.turnT;
-        if (outMs < this.cfg.minPhaseMs || backMs < this.cfg.minPhaseMs) return null;
+        if (t - this.startT < this.cfg.minRepMs) return null;
         this.n += 1;
         return { index: this.n, startT: this.startT, turnT: this.turnT, endT: t, outMs, backMs };
       }

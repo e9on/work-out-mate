@@ -25,7 +25,7 @@ export type ExerciseDef = RepExerciseDef | HoldExerciseDef;
 export const EMA_ALPHA = 0.5;
 
 // 임계값은 출발점이다. Task 10에서 녹화 데이터로 조정한다. 모아 두는 곳은 이 파일.
-const COMMON = { minPhaseMs: 250, pauseAfterMs: 1500 } as const;
+const COMMON = { minRepMs: 500, pauseAfterMs: 1500 } as const;
 const REP_CFG = {
   squat: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
   pushup: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },

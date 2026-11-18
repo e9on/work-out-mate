@@ -152,7 +152,7 @@ type RepConfig = {
   enter: number;             // 이 값을 넘어가면(restSide 반대 방향) '동작 중'
   turn: number;              // 이 값까지 가야 '반환점 도달'
   exit: number;              // 다시 이 값을 넘어 돌아오면 1회 확정 (enter와 히스테리시스)
-  minPhaseMs: number;        // 나감·돌아옴 각 구간 최소 시간
+  minRepMs: number;          // 반복 전체(startT→endT) 최소 시간. 구간별 최소 시간은 두지 않음
   pauseAfterMs: number;      // 신호 null이 이만큼 이어지면 진행 중 반복을 버림
 };
 type RepPhase = 'rest' | 'out' | 'turned' | 'paused';
@@ -167,11 +167,11 @@ class RepCounter {
 ```
 
 상태 전이 (restSide 'high' 기준, 'low'는 부등호 반대):
-`rest --(signal < enter)--> out --(signal <= turn)--> turned --(signal > exit, 두 구간 모두 ≥ minPhaseMs)--> rest (+1, RepEvent)`
+`rest --(signal < enter)--> out --(signal <= turn)--> turned --(signal > exit, endT−startT ≥ minRepMs)--> rest (+1, RepEvent)`
 `out --(signal > exit, turn 미도달)--> rest (세지 않음)`
 signal null → 직전 phase 기억, `paused`. `pauseAfterMs` 넘게 이어지면 진행 중 반복을 버리고 `rest`로 복귀. 그 전에 신호가 돌아오면 기억한 phase로 계속.
 
-- [ ] **Step 1: 실패하는 테스트** (cfg: restSide 'high', enter 150, turn 95, exit 160, minPhaseMs 250, pauseAfterMs 1500; 신호 배열은 33ms 간격)
+- [ ] **Step 1: 실패하는 테스트** (cfg: restSide 'high', enter 150, turn 95, exit 160, minRepMs 500, pauseAfterMs 1500; 신호 배열은 33ms 간격)
   - `완전한 1회`: 170→…→90→…→170 (각 구간 400ms 이상) → count 1, 이벤트 1개, `outMs`≈나감 구간 시간
   - `3회 연속` → 3
   - `가만히 서 있음`: 170 근처 ±3 노이즈 300프레임 → 0 *(Review Focus 2)*
@@ -251,7 +251,7 @@ function replay(id: ExerciseId, frames: PoseFrame[]): TrackerState & { reps: Rep
 | negative | 팔꿈치 각도 | low | 70/150/60 | `RepEvent.outMs` = 내려온 시간 |
 | deadHang | holding = 두 손목이 코보다 위 && 양 팔꿈치 각도 ≥ 150 | — | startAfterMs 300, graceMs 500 | |
 
-모든 RepConfig: minPhaseMs 250, pauseAfterMs 1500. **임계값은 출발점일 뿐이고 Task 10에서 녹화 데이터로 조정한다.**
+모든 RepConfig: minRepMs 500(전체 반복 최소 시간), pauseAfterMs 1500. (구간별 minPhaseMs 250을 바꾼 이유: 실측에서 150→100° 구간이 0.19~0.23초라 정상 반복이 버려졌고, 실제 반복 전체는 1.26~1.63초였다.) **임계값은 출발점일 뿐이고 Task 10에서 녹화 데이터로 조정한다.**
 
 - [ ] **Step 1: 실패하는 테스트** — `buildPose`/`series`로:
   - 운동마다 "완전한 1회" 각도 열 → `replay(id).count === 1` (deadHang은 `wristAboveNose:true, elbow:170` 5초 → `heldMs` ≈ 5000±100, 시작 시각은 처음 true 프레임이므로 startAfterMs를 빼지 않는다)

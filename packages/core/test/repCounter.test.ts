@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RepCounter, type RepConfig, type RepEvent } from '../src/counter/repCounter';
 
-const CFG: RepConfig = { restSide: 'high', enter: 150, turn: 95, exit: 160, minPhaseMs: 250, pauseAfterMs: 1500 };
+const CFG: RepConfig = { restSide: 'high', enter: 150, turn: 95, exit: 160, minRepMs: 500, pauseAfterMs: 1500 };
 const DT = 33;
 
 type Frame = [number, number | null];
@@ -94,11 +94,38 @@ describe('RepCounter', () => {
     expect(c.phase).toBe('rest');
   });
 
-  it('너무 빠름', () => {
+  it('너무 빠름 (전체 200ms)', () => {
     const c = new RepCounter(CFG);
     run(c, path([[170, 0], [90, 100], [170, 100]]));
     expect(c.count).toBe(0);
     expect(c.phase).toBe('rest');
+  });
+
+  it('빠른 하강 회귀: 150→100° 구간 약 200ms여도 전체가 충분하면 1회', () => {
+    const c = new RepCounter(CFG);
+    const ev = run(c, path([[170, 0], [150, 300], [100, 200], [90, 100], [170, 1000]]));
+    expect(c.count).toBe(1);
+    expect(ev[0]!.outMs).toBeLessThan(250);
+    expect(ev[0]!.endT - ev[0]!.startT).toBeGreaterThanOrEqual(500);
+  });
+
+  it('전체가 너무 짧은 반복(400ms)은 세지 않음', () => {
+    const c = new RepCounter(CFG);
+    const ev = run(c, [[0, 170], [100, 140], [250, 90], [500, 165], [533, 170]]);
+    expect(ev).toHaveLength(0);
+    expect(c.count).toBe(0);
+    expect(c.phase).toBe('rest');
+  });
+
+  it('경계: 전체 정확히 500ms면 1회, 499ms면 0회', () => {
+    const mk = (endT: number): Frame[] => [[0, 170], [100, 140], [300, 90], [endT, 165], [endT + 33, 170]];
+    const a = new RepCounter(CFG);
+    const evA = run(a, mk(600));
+    expect(evA).toHaveLength(1);
+    expect(evA[0]!.endT - evA[0]!.startT).toBe(500);
+    const b = new RepCounter(CFG);
+    run(b, mk(599));
+    expect(b.count).toBe(0);
   });
 
   it('불규칙 간격', () => {
@@ -150,14 +177,15 @@ describe('RepCounter', () => {
       c.update(t, null);
       expect(c.phase).toBe('paused');
     }
-    const ev = run(c, path([[90, 0], [170, 600]], t));
+    // 가려진 동안 일어선 것으로 보고, 신호가 서 있는 자세(170)로 돌아온다. 진행 중이던 반복은 버려져야 한다.
+    const ev = run(c, [[t, 170], [t + DT, 170]]);
     expect(ev).toHaveLength(0);
     expect(c.count).toBe(0);
     expect(c.phase).toBe('rest');
   });
 
   it('restSide low (네거티브)', () => {
-    const c = new RepCounter({ restSide: 'low', enter: 70, turn: 150, exit: 60, minPhaseMs: 250, pauseAfterMs: 1500 });
+    const c = new RepCounter({ restSide: 'low', enter: 70, turn: 150, exit: 60, minRepMs: 500, pauseAfterMs: 1500 });
     run(c, path([[50, 0], [155, 600], [50, 600]]));
     expect(c.count).toBe(1);
   });
