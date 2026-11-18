@@ -215,6 +215,12 @@ describe('pullup·negative 신호는 양팔 팔꿈치 각도 평균', () => {
 });
 
 describe('negative: 바닥에 닿는 즉시 센다', () => {
+  it('enter→turn이 약 300ms인 빠른 내려오기도 1회(교정은 outMs로 따로)', () => {
+    const v = [...Array(5).fill(40), ...lin(40, 170, 30), ...Array(10).fill(170)];
+    const r = replay('negative', series(v, 'elbow'));
+    expect(r.count).toBe(1);
+    expect(r.reps[0]!.outMs).toBeLessThan(400);
+  });
   it('위(40)에서 바닥(170)까지 내려가고 끝나도 1', () => {
     const v = [...Array(5).fill(40), ...lin(40, 170, 90), ...Array(10).fill(170)];
     expect(replay('negative', series(v, 'elbow')).count).toBe(1);

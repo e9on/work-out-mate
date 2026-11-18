@@ -31,7 +31,7 @@ const REP_CFG = {
   pushup: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
   dumbbellBench: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
   pullup: { restSide: 'high', enter: 140, turn: 80, exit: 155, ...COMMON },
-  negative: { restSide: 'low', enter: 100, turn: 140, exit: 95, countAt: 'turn', ...COMMON },
+  negative: { restSide: 'low', enter: 100, turn: 140, exit: 95, countAt: 'turn', ...COMMON, minRepMs: 250 },
 } satisfies Record<string, RepConfig>;
 const HOLD_CFG: HoldConfig = { startAfterMs: 300, graceMs: 500 };
 const MIN_VISIBILITY = 0.5;

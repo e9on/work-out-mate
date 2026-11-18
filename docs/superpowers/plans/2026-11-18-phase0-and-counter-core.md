@@ -249,7 +249,7 @@ function replay(id: ExerciseId, frames: PoseFrame[]): TrackerState & { reps: Rep
 | pushup | 팔꿈치 각도 | high | 150/100/160 | |
 | dumbbellBench | 양팔 팔꿈치 각도의 **평균** (양팔 동시) | high | 150/100/160 | 양팔 다 보여야 함, 한쪽만 보이면 null |
 | pullup | **양팔 팔꿈치 각도 평균**(한쪽만 보이면 그쪽, 둘 다 안 보이면 null). 턱·철봉 위치는 보지 않음 — 사용자 결정 | high | 140/80/155 | |
-| negative | **양팔 팔꿈치 각도 평균**(pullup과 동일 규칙) | low | **100/140/95**, `countAt: 'turn'` | `RepEvent.outMs` = 내려온 시간. 근거: S23 실측에서 위로 올라가는 동작은 점프라 마지막 반복이 안 세졌고, 좌우 한쪽만 쓰면 덜 펴진 팔 때문에 turn에 못 닿았으며, 맨 위 양팔 평균이 53~85°(바닥 145~159°)였다 |
+| negative | **양팔 팔꿈치 각도 평균**(pullup과 동일 규칙) | low | **100/140/95**, `countAt: 'turn'`, **minRepMs 250** | `RepEvent.outMs` = 내려온 시간. 근거: S23 실측 enter→turn이 284~387ms라 minRepMs 500이면 2·3번째가 버려져 250으로 낮춤(교정은 outMs로 따로). 또 위로 올라가는 동작은 점프라 마지막 반복이 안 세졌고 위로 올라가는 동작은 점프라 마지막 반복이 안 세졌고, 좌우 한쪽만 쓰면 덜 펴진 팔 때문에 turn에 못 닿았으며, 맨 위 양팔 평균이 53~85°(바닥 145~159°)였다 |
 | deadHang | holding = 두 손목이 코보다 위 && 양 팔꿈치 각도 ≥ 150 | — | startAfterMs 300, graceMs 500 | |
 
 모든 RepConfig: minRepMs 500(전체 반복 최소 시간), pauseAfterMs 1500. (구간별 minPhaseMs 250을 바꾼 이유: 실측에서 150→100° 구간이 0.19~0.23초라 정상 반복이 버려졌고, 실제 반복 전체는 1.26~1.63초였다.) **임계값은 출발점일 뿐이고 Task 10에서 녹화 데이터로 조정한다.**
