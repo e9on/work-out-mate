@@ -4,3 +4,5 @@ export { jointAngle } from './pose/angles';
 export { Ema, visibleEnough } from './pose/signal';
 export { RepCounter } from './counter/repCounter';
 export type { RepConfig, RepPhase, RepEvent } from './counter/repCounter';
+export { HoldTimer } from './counter/holdTimer';
+export type { HoldConfig } from './counter/holdTimer';
