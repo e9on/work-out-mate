@@ -119,4 +119,32 @@ describe('HoldTimer', () => {
     expect(h.state).toBe('idle');
     expect(h.heldMs).toBe(0);
   });
+
+  it('grace가 지난 뒤 중간 프레임 없이 true가 오면 ended (이어 세지 않음)', () => {
+    const h = new HoldTimer(CFG);
+    h.update(0, true);
+    h.update(400, true);
+    h.update(3000, null);
+    h.update(3700, true);
+    expect(h.state).toBe('ended');
+    expect(h.heldMs).toBe(3000);
+  });
+
+  it('grace 경계: 499ms 뒤 true는 이어 세고, 정확히 500ms 뒤 true는 ended', () => {
+    const a = new HoldTimer(CFG);
+    a.update(0, true);
+    a.update(400, true);
+    a.update(1000, false);
+    a.update(1499, true);
+    expect(a.state).toBe('holding');
+    expect(a.heldMs).toBe(1499);
+
+    const b = new HoldTimer(CFG);
+    b.update(0, true);
+    b.update(400, true);
+    b.update(1000, false);
+    b.update(1500, true);
+    expect(b.state).toBe('ended');
+    expect(b.heldMs).toBe(1000);
+  });
 });

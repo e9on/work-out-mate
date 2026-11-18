@@ -55,7 +55,11 @@ export class HoldTimer {
       return;
     }
 
-    // holding
+    // holding. grace가 이미 지났으면 true여도 이어 세지 않고 끝낸다.
+    if (this.breakT !== null && t - this.breakT >= this.cfg.graceMs) {
+      this.st = 'ended';
+      return;
+    }
     if (holding === true) {
       this.breakT = null;
       this.lastTrueT = t;
