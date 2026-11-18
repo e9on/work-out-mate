@@ -60,7 +60,11 @@ async function rebuild(): Promise<void> {
   old?.landmarker.close();
   tracker = createTracker(exerciseSel.value as ExerciseId);
   state = tracker.state();
+  inferMs.clear();
+  doneTimes.length = 0;
+  skipped = 0;
   note = `${model} 모델 로딩 중...`;
+  refreshHud();
   try {
     const made = await createLandmarker(model, delegate);
     if (gen !== generation) {
@@ -72,7 +76,9 @@ async function rebuild(): Promise<void> {
     note = made.fellBack ? 'GPU 생성 실패 -> CPU로 자동 전환' : '';
     if (made.fellBack) delegateSel.value = 'CPU';
   } catch (e) {
-    note = `랜드마커 생성 실패: ${e instanceof Error ? e.message : String(e)}`;
+    if (gen === generation) note = `랜드마커 생성 실패: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    if (gen === generation) refreshHud();
   }
 }
 
@@ -95,7 +101,8 @@ function refreshHud(): void {
 function onFrame(): void {
   schedule();
   if (video.readyState < 2) return;
-  if (!lm || busy) {
+  if (!lm) return;
+  if (busy) {
     skipped++;
     return;
   }

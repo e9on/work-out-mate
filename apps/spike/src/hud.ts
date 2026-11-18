@@ -32,6 +32,7 @@ export class Hud {
 export class Stat {
   private v: number[] = [];
   constructor(private n = 120) {}
+  clear(): void { this.v = []; }
   add(x: number): void { this.v.push(x); if (this.v.length > this.n) this.v.shift(); }
   avg(): number { return this.v.length ? this.v.reduce((a, b) => a + b, 0) / this.v.length : 0; }
   p95(): number {
