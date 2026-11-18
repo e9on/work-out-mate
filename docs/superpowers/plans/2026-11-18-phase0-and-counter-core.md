@@ -335,6 +335,27 @@ TDD 대상이 아니다. 완료 기준은 아래 수동 확인.
 - [ ] **Step 5: 전부 통과 확인** — `npm test -w packages/core` → 전체 PASS. 통과 못 하는 운동은 `phase0-results.md`에 "보류"와 원인을 적는다.
 - [ ] **Step 6: 커밋** — `feat(core): 실측 기반 임계값 조정`
 
+### Task 6b: 준비 자세 기준(보정) + 상대 판정 카운터
+
+지시서: `.superpowers/sdd/2026-11-18-phase0-and-counter-core/task-6b-adaptive-brief.md` (사용자 결정 2026-11-18: 고정 각도 대신 각자의 준비 자세를 기준으로 센다)
+
+**Files:** Create `packages/core/src/counter/adaptiveRepCounter.ts`, `packages/core/test/adaptiveRepCounter.test.ts` / Modify `definitions.ts`, `runner.ts`(`TrackerState.calibrating`·`baseline`), `index.ts`, `exercises.test.ts`, `test/fixtures/sample-squat-3.json`, `apps/spike/src/main.ts`·`hud.ts`
+
+- 적용: `squat`·`pushup`·`dumbbellBench` → `AdaptiveRepCounter`(정의에 `adaptive: AdaptiveConfig`). `pullup`·`negative`는 `rep: RepConfig` 그대로, `deadHang` 그대로.
+- 판정: 처음 700ms 동안 변동 ≤ 8°이고 평균 ≥ minBaseline이면 그 평균이 기준(못 잡으면 3초 뒤 defaultBaseline). 시작 = 직전 최고점 − startDrop, 바닥 = 기준 − depth, 복귀 = 이번 최저점 + rebound.
+
+| 운동 | depth | rebound | startDrop | defaultBaseline | minBaseline |
+|---|---|---|---|---|---|
+| squat | 60 | 35 | 10 | 170 | 150 |
+| pushup | 40 | 30 | 10 | 165 | 140 |
+| dumbbellBench | 40 | 30 | 10 | 165 | 140 |
+
+공통: calibrateMs 700, calibrateTol 8, calibrateTimeoutMs 3000, minRepMs 500, pauseAfterMs 1500. 지시서 초기값 그대로(조정 없음).
+
+- 근거: S23 실측에서 푸시업 준비 자세 166~169°, 반복 사이 맨 위 155~157°, 바닥 90~114°. 맨 위가 준비 자세보다 약 10° 덜 펴지므로 복귀는 준비 자세가 아니라 이번 최저점 기준으로 본다. 카메라 각도로 전체가 밀리는 경우(−15°)도 기준이 같이 밀려 센다.
+- 합격 테스트(실제 녹화 5개): 전부 통과. squat 6/5, negative 3, deadHang 13.8초는 이전과 같고, pushup은 5 → 6(기대 5, ±1 안). 늘어난 1회는 녹화 끝에서 녹화를 끄러 움직이는 구간(0.6초 만에 157→91→122 뒤 가림)이다.
+- 합성 테스트는 준비 자세(1초 정지)를 앞에 붙여야 센다. 기존 `exercises.test.ts`의 squat·pushup·bench 시나리오와 CLI 샘플 `sample-squat-3.json`(합성)에 1초 준비 자세를 붙였다.
+
 ---
 
 ## 다음 계획으로 넘길 것

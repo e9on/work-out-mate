@@ -22,7 +22,8 @@ export class Hud {
   render(i: HudInfo): void {
     const s = i.state;
     const main = i.kind === 'hold' ? `버틴 시간 ${(s.heldMs / 1000).toFixed(1)}초` : `횟수 ${s.count}`;
-    this.big.textContent = `${main}${s.paused ? '  (일시정지)' : ''}`;
+    const note = s.paused ? '  (일시정지)' : s.calibrating ? '  (준비 자세를 잡아 주세요)' : '';
+    this.big.textContent = `${main}${note}`;
     const ko = i.voices.filter((v) => /\(ko/i.test(v)).join(', ');
     this.box.textContent = [
       i.diag,

@@ -101,18 +101,32 @@ function updateDiag(frame: import('@wom/core').PoseFrame): void {
     return;
   }
   const s = def.signal(frame);
-  const r = def.rep;
+  const restSide = def.adaptive ? def.adaptive.restSide : def.rep.restSide;
   if (state.count !== diagCount) {
     diagCount = state.count;
     diagExtreme = null;
   }
   if (s !== null) {
-    const deeper = r.restSide === 'high' ? s < (diagExtreme ?? Infinity) : s > (diagExtreme ?? -Infinity);
+    const deeper = restSide === 'high' ? s < (diagExtreme ?? Infinity) : s > (diagExtreme ?? -Infinity);
     if (deeper) diagExtreme = s;
+  }
+  let rule: string;
+  if (def.adaptive) {
+    // 준비 자세 기준: 바닥 = 기준 - depth, 복귀 = 이번 최저 + rebound ('low'면 방향만 반대)
+    const a = def.adaptive;
+    const b = state.baseline;
+    const dir = a.restSide === 'high' ? 1 : -1;
+    rule =
+      b === null
+        ? `기준 보정 중(준비 자세 ${a.calibrateMs / 1000}초 정지)`
+        : `기준 ${b.toFixed(0)}° 바닥${dir > 0 ? '<=' : '>='}${(b - dir * a.depth).toFixed(0)}° 복귀=최저${dir > 0 ? '+' : '-'}${a.rebound}°`;
+  } else {
+    const r = def.rep;
+    rule = `기준 시작<${r.enter} 바닥<=${r.turn} 복귀>${r.exit}`;
   }
   diag =
     `진단: 신호 ${s === null ? '없음(안 보임)' : s.toFixed(0) + '°'}   이번 최저 ${diagExtreme === null ? '-' : diagExtreme.toFixed(0) + '°'}` +
-    `   기준 시작<${r.enter} 바닥<=${r.turn} 복귀>${r.exit}${r.restSide === 'low' ? '(반대 방향)' : ''}\n` +
+    `   ${rule}${restSide === 'low' ? '(반대 방향)' : ''}\n` +
     `가시성(어깨·팔꿈치·손목 / 엉덩이·무릎·발목) ${vis}`;
 }
 
