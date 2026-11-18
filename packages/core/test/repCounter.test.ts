@@ -128,6 +128,27 @@ describe('RepCounter', () => {
     expect(b.count).toBe(0);
   });
 
+  it('처음부터 바닥(90)에서 추적을 시작해 올라오면 세지 않고, 그 뒤 정상 1회는 센다', () => {
+    const c = new RepCounter(CFG);
+    const up = path([[90, 0], [170, 600]]);
+    expect(run(c, up)).toHaveLength(0);
+    expect(c.count).toBe(0);
+    const t0 = up[up.length - 1]![0] + DT;
+    const ev = run(c, path([[170, 0], [90, 600], [170, 600]], t0));
+    expect(ev).toHaveLength(1);
+    expect(c.count).toBe(1);
+  });
+
+  it('restSide low: 올린 자세(155)에서 시작해 내려오면 세지 않음', () => {
+    const c = new RepCounter({ restSide: 'low', enter: 70, turn: 150, exit: 60, minRepMs: 500, pauseAfterMs: 1500 });
+    const down = path([[160, 0], [160, 100], [50, 600]]);
+    expect(run(c, down)).toHaveLength(0);
+    expect(c.count).toBe(0);
+    const t0 = down[down.length - 1]![0] + DT;
+    run(c, path([[50, 0], [155, 600], [50, 600]], t0));
+    expect(c.count).toBe(1);
+  });
+
   it('불규칙 간격', () => {
     const c = new RepCounter(CFG);
     const frames: Frame[] = [
@@ -177,8 +198,7 @@ describe('RepCounter', () => {
       c.update(t, null);
       expect(c.phase).toBe('paused');
     }
-    // 가려진 동안 일어선 것으로 보고, 신호가 서 있는 자세(170)로 돌아온다. 진행 중이던 반복은 버려져야 한다.
-    const ev = run(c, [[t, 170], [t + DT, 170]]);
+    const ev = run(c, path([[90, 0], [170, 600]], t));
     expect(ev).toHaveLength(0);
     expect(c.count).toBe(0);
     expect(c.phase).toBe('rest');

@@ -36,6 +36,8 @@ export class RepCounter {
   private startT = 0;
   private turnT = 0;
   private pausedSince: number | null = null;
+  /** 시작 자세 쪽(exit 너머)을 한 번 지나야 true. false면 rest에서 out으로 넘어가지 않는다. */
+  private armed = false;
 
   constructor(private readonly cfg: RepConfig) {}
 
@@ -53,16 +55,23 @@ export class RepCounter {
     this.startT = 0;
     this.turnT = 0;
     this.pausedSince = null;
+    this.armed = false;
+  }
+
+  /** 가림이 길어져 진행 중 반복을 버린다. 시작 자세를 다시 지나야 센다. */
+  private discard(): void {
+    this.inner = 'rest';
+    this.armed = false;
   }
 
   update(t: number, signal: number | null): RepEvent | null {
     if (signal === null) {
       if (this.pausedSince === null) this.pausedSince = t;
-      if (t - this.pausedSince >= this.cfg.pauseAfterMs) this.inner = 'rest';
+      if (t - this.pausedSince >= this.cfg.pauseAfterMs) this.discard();
       return null;
     }
     if (this.pausedSince !== null) {
-      if (t - this.pausedSince >= this.cfg.pauseAfterMs) this.inner = 'rest';
+      if (t - this.pausedSince >= this.cfg.pauseAfterMs) this.discard();
       this.pausedSince = null;
     }
 
@@ -75,6 +84,10 @@ export class RepCounter {
 
     switch (this.inner) {
       case 'rest':
+        if (!this.armed) {
+          if (s > x) this.armed = true;
+          return null;
+        }
         if (s < e) {
           this.inner = 'out';
           this.startT = t;
@@ -86,11 +99,13 @@ export class RepCounter {
           this.turnT = t;
         } else if (s > x) {
           this.inner = 'rest';
+          this.armed = true;
         }
         return null;
       case 'turned': {
         if (s <= x) return null;
         this.inner = 'rest';
+        this.armed = true;
         const outMs = this.turnT - this.startT;
         const backMs = t - this.turnT;
         if (t - this.startT < this.cfg.minRepMs) return null;
