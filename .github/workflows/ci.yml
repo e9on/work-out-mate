@@ -56,7 +56,14 @@ jobs:
         run: npm run android:build -w apps/spike
       - name: 디버그 APK 빌드
         working-directory: apps/spike/android
-        run: ./gradlew assembleDebug --no-daemon
+        # Maven Central이 가끔 429(요청 과다)로 의존성 다운로드를 거절한다. 잠시 쉬었다가 최대 3번 시도한다.
+        run: |
+          for i in 1 2 3; do
+            ./gradlew assembleDebug --no-daemon && exit 0
+            echo "Gradle 빌드 실패 (${i}/3). 30초 뒤 다시 시도해요."
+            sleep 30
+          done
+          exit 1
       - name: 권한 확인 (CAMERA만, INTERNET 없음, allowBackup=false)
         run: |
           AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
