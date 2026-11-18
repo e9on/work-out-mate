@@ -27,7 +27,7 @@ describe('운동 6종: 완전한 1회', () => {
     expect(replay('pullup', series(oneRep(170, 70), 'elbow')).count).toBe(1);
   });
   it('negative: 팔꿈치 40→170→40', () => {
-    expect(replay('negative', series(oneRep(40, 170, 45), 'elbow')).count).toBe(1);
+    expect(replay('negative', series(oneRep(40, 170, 90), 'elbow')).count).toBe(1);
   });
   it('2회 연속이면 2', () => {
     const v = [...oneRep(170, 85), ...oneRep(170, 85)];
@@ -63,13 +63,13 @@ describe('dumbbellBench', () => {
 
 describe('negative', () => {
   it('outMs는 내려온(40→170) 구간 시간', () => {
-    // 70 초과 시점 ~ 150 이상 시점. 선형 40→170을 60프레임(약 2000ms)에 걸쳐 진행.
-    const n = 60;
+    // 100 초과 시점 ~ 140 이상 시점. 선형 40→170을 60프레임(약 2000ms)에 걸쳐 진행.
+    const n = 90;
     const frames = series(oneRep(40, 170, n), 'elbow');
     const r = replay('negative', frames);
     expect(r.reps).toHaveLength(1);
-    // 70→150 구간은 전체의 80/130. EMA 지연이 같은 폭으로 양쪽에 걸리므로 시간차는 유지된다.
-    const expected = (80 / 130) * n * 33;
+    // 100→140 구간은 전체의 40/130. EMA 지연이 같은 폭으로 양쪽에 걸리므로 시간차는 유지된다.
+    const expected = (40 / 130) * n * 33;
     expect(Math.abs(r.reps[0]!.outMs - expected)).toBeLessThanOrEqual(50);
   });
 });
@@ -105,7 +105,7 @@ describe('createTracker와 replay', () => {
   const cases: Array<[ExerciseId, ReturnType<typeof series>]> = [
     ['squat', series(oneRep(175, 90), 'knee')],
     ['pushup', series(oneRep(170, 85), 'elbow')],
-    ['negative', series(oneRep(40, 170, 45), 'elbow')],
+    ['negative', series(oneRep(40, 170, 90), 'elbow')],
   ];
   it.each(cases)('%s: 프레임 단위 push 결과 = replay 결과', (id, frames) => {
     const tr = createTracker(id);
@@ -156,7 +156,7 @@ describe('NaN 방어', () => {
     ['dumbbellBench', 85],
     ['negative', -1],
   ] as const)('%s: NaN 각도 프레임이 끼어도 이후 반복이 정상적으로 세진다', (id, bottom) => {
-    const v = id === 'negative' ? oneRep(40, 170, 45) : oneRep(170, bottom);
+    const v = id === 'negative' ? oneRep(40, 170, 90) : oneRep(170, bottom);
     expect(replay(id, poison(series(v, 'elbow'))).count).toBe(1);
   });
 
@@ -172,5 +172,51 @@ describe('NaN 방어', () => {
       return bad;
     });
     expect(replay('squat', frames).count).toBe(1);
+  });
+});
+
+describe('pullup·negative 신호는 양팔 팔꿈치 각도 평균', () => {
+  /** 왼팔은 left도, 오른팔은 right도인 포즈(오른팔 좌표를 다른 포즈에서 가져옴). */
+  function asym(left: number, right: number, opts: { hidden?: number[] } = {}) {
+    const a = buildPose({ t: 0, elbow: left, ...opts });
+    const b = buildPose({ t: 0, elbow: right });
+    for (const i of [LM.R_SHOULDER, LM.R_ELBOW, LM.R_WRIST]) {
+      a.world[i] = { ...b.world[i]! };
+      a.image[i] = { ...b.image[i]!, visibility: a.image[i]!.visibility };
+    }
+    return a;
+  }
+  const uniform = (id: 'pullup' | 'negative', deg: number) =>
+    EXERCISES[id].kind === 'reps' ? (EXERCISES[id] as { signal(f: unknown): number | null }).signal(buildPose({ t: 0, elbow: deg })) : null;
+  const sig = (id: 'pullup' | 'negative', f: ReturnType<typeof buildPose>) =>
+    (EXERCISES[id] as { signal(f: unknown): number | null }).signal(f);
+
+  it.each(['pullup', 'negative'] as const)('%s: 왼팔 120, 오른팔 160이면 평균', (id) => {
+    const expected = (uniform(id, 120)! + uniform(id, 160)!) / 2;
+    expect(sig(id, asym(120, 160))).toBeCloseTo(expected, 5);
+    // 가시성이 한쪽이 높아도(왼팔) 평균이어야 한다
+    const f = asym(120, 160);
+    for (const i of [LM.R_SHOULDER, LM.R_ELBOW, LM.R_WRIST]) f.image[i]!.visibility = 0.6;
+    expect(sig(id, f)).toBeCloseTo(expected, 5);
+  });
+
+  it.each(['pullup', 'negative'] as const)('%s: 한쪽 팔만 보이면 그쪽 값', (id) => {
+    const f = asym(120, 160, { hidden: [LM.L_ELBOW, LM.L_WRIST] });
+    expect(sig(id, f)).toBeCloseTo(uniform(id, 160)!, 5);
+    const g = asym(120, 160);
+    for (const i of [LM.R_ELBOW, LM.R_WRIST]) g.image[i]!.visibility = 0;
+    expect(sig(id, g)).toBeCloseTo(uniform(id, 120)!, 5);
+  });
+
+  it.each(['pullup', 'negative'] as const)('%s: 둘 다 안 보이면 null', (id) => {
+    const f = buildPose({ t: 0, elbow: 120, hidden: [LM.L_ELBOW, LM.L_WRIST, LM.R_ELBOW, LM.R_WRIST] });
+    expect(sig(id, f)).toBeNull();
+  });
+});
+
+describe('negative: 바닥에 닿는 즉시 센다', () => {
+  it('위(40)에서 바닥(170)까지 내려가고 끝나도 1', () => {
+    const v = [...Array(5).fill(40), ...lin(40, 170, 90), ...Array(10).fill(170)];
+    expect(replay('negative', series(v, 'elbow')).count).toBe(1);
   });
 });

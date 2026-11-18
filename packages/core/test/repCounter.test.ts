@@ -218,3 +218,72 @@ describe('RepCounter', () => {
     expect(c.phase).toBe('rest');
   });
 });
+
+describe("countAt: 'turn' (네거티브처럼 바닥 도달 즉시 확정)", () => {
+  const TURN: RepConfig = {
+    restSide: 'low', enter: 100, turn: 140, exit: 95, minRepMs: 500, pauseAfterMs: 1500, countAt: 'turn',
+  };
+
+  it('위(50) → 천천히 바닥(150): 바닥에 닿는 프레임에 이벤트, outMs는 내려온 시간', () => {
+    const c = new RepCounter(TURN);
+    const frames = path([[50, 0], [150, 2000]]);
+    let hit = -1;
+    let ev: RepEvent | null = null;
+    frames.forEach(([t, v], i) => {
+      const e = c.update(t, v);
+      if (e) { ev = e; hit = i; }
+    });
+    expect(ev).not.toBeNull();
+    const e = ev as unknown as RepEvent;
+    expect(c.count).toBe(1);
+    expect(frames[hit]![1]).toBeGreaterThanOrEqual(140);
+    expect(frames[hit]![1]).toBeLessThan(150);
+    expect(e.endT).toBe(e.turnT);
+    expect(e.backMs).toBe(0);
+    expect(e.outMs).toBe(e.turnT - e.startT);
+    // 100→140 구간: 2000ms 중 40/100
+    expect(Math.abs(e.outMs - 800)).toBeLessThanOrEqual(50);
+  });
+
+  it('다시 위로 올라가지 않고 끝나도 1', () => {
+    const c = new RepCounter(TURN);
+    run(c, path([[50, 0], [150, 1500], [150, 1000]]));
+    expect(c.count).toBe(1);
+  });
+
+  it('위→바닥→위→바닥→위→바닥 → 3', () => {
+    const c = new RepCounter(TURN);
+    run(c, path([[50, 0], [150, 1500], [50, 800], [150, 1500], [50, 800], [150, 1500]]));
+    expect(c.count).toBe(3);
+  });
+
+  it('바닥에서 시작 → 위 → 바닥 → 1 (처음 바닥은 세지 않음)', () => {
+    const c = new RepCounter(TURN);
+    run(c, path([[150, 0], [150, 600], [50, 800], [150, 1500]]));
+    expect(c.count).toBe(1);
+  });
+
+  it('확정 뒤 바닥에 머물러도 다시 세지 않는다', () => {
+    const c = new RepCounter(TURN);
+    run(c, path([[50, 0], [150, 1500], [145, 600], [150, 600], [120, 300], [150, 300]]));
+    expect(c.count).toBe(1);
+  });
+
+  it('최소 시간에 못 미쳐 확정 못 한 뒤에도 위로 올라가야 다음 반복', () => {
+    const c = new RepCounter(TURN);
+    // 빠르게 100→140 (300ms) = minRepMs 미달, 세지 않음
+    run(c, path([[50, 0], [150, 150]]));
+    expect(c.count).toBe(0);
+    // 위로 올라가지 않고 바닥 근처에서 흔들려도 시작 안 됨
+    run(c, path([[150, 0], [90 + 20, 100], [150, 300]], 1000));
+    expect(c.count).toBe(0);
+  });
+
+  it("기본값('return')은 지금처럼 위로 돌아올 때 확정", () => {
+    const c = new RepCounter({ ...TURN, countAt: undefined });
+    run(c, path([[50, 0], [150, 1500]]));
+    expect(c.count).toBe(0);
+    run(c, path([[150, 0], [50, 800]], 5000));
+    expect(c.count).toBe(1);
+  });
+});

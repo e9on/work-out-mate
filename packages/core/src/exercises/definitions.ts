@@ -31,7 +31,7 @@ const REP_CFG = {
   pushup: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
   dumbbellBench: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
   pullup: { restSide: 'high', enter: 140, turn: 80, exit: 155, ...COMMON },
-  negative: { restSide: 'low', enter: 70, turn: 150, exit: 60, ...COMMON },
+  negative: { restSide: 'low', enter: 100, turn: 140, exit: 95, countAt: 'turn', ...COMMON },
 } satisfies Record<string, RepConfig>;
 const HOLD_CFG: HoldConfig = { startAfterMs: 300, graceMs: 500 };
 const MIN_VISIBILITY = 0.5;
@@ -70,6 +70,14 @@ function bothArmsMean(f: PoseFrame): number | null {
   return l === null || r === null ? null : (l + r) / 2;
 }
 
+/** 양팔 평균. 한쪽만 보이면 그쪽, 둘 다 안 보이면 null. */
+function meanVisibleArms(f: PoseFrame): number | null {
+  const l = visibleEnough(f, L_ARM, MIN_VISIBILITY) ? angleOf(f, L_ARM) : null;
+  const r = visibleEnough(f, R_ARM, MIN_VISIBILITY) ? angleOf(f, R_ARM) : null;
+  if (l !== null && r !== null) return (l + r) / 2;
+  return l ?? r;
+}
+
 function deadHangHolding(f: PoseFrame): boolean | null {
   const needed = [LM.NOSE, ...L_ARM, ...R_ARM];
   if (!visibleEnough(f, needed, MIN_VISIBILITY)) return null;
@@ -85,7 +93,7 @@ export const EXERCISES: Record<ExerciseId, ExerciseDef> = {
   pushup: { id: 'pushup', kind: 'reps', signal: armAngle, rep: REP_CFG.pushup },
   dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: bothArmsMean, rep: REP_CFG.dumbbellBench },
   // 사용자 결정: 턱걸이는 팔꿈치 각도로만 판별한다(코·손목·철봉 위치는 보지 않음).
-  pullup: { id: 'pullup', kind: 'reps', signal: armAngle, rep: REP_CFG.pullup },
-  negative: { id: 'negative', kind: 'reps', signal: armAngle, rep: REP_CFG.negative },
+  pullup: { id: 'pullup', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.pullup },
+  negative: { id: 'negative', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.negative },
   deadHang: { id: 'deadHang', kind: 'hold', holding: deadHangHolding, hold: HOLD_CFG },
 };

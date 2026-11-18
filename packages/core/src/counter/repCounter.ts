@@ -11,6 +11,12 @@ export type RepConfig = {
   minRepMs: number;
   /** 신호 null이 이만큼 이어지면 진행 중 반복을 버림(ms) */
   pauseAfterMs: number;
+  /**
+   * 반복을 확정하는 시점. 기본 'return'(시작 자세로 돌아올 때).
+   * 'turn'이면 반환점에 닿는 프레임에서 바로 확정한다(네거티브처럼 돌아오는 동작이 운동이 아닐 때).
+   * 확정 뒤에는 시작 자세 쪽으로 exit를 넘어야 다음 반복을 시작한다.
+   */
+  countAt?: 'return' | 'turn';
 };
 
 export type RepPhase = 'rest' | 'out' | 'turned' | 'paused';
@@ -95,8 +101,16 @@ export class RepCounter {
         return null;
       case 'out':
         if (s <= tn) {
-          this.inner = 'turned';
           this.turnT = t;
+          if (this.cfg.countAt === 'turn') {
+            // 바닥 도달 즉시 확정. 최소 시간 미달이어도 재무장 전에는 새 반복을 시작하지 않는다.
+            this.inner = 'rest';
+            this.armed = false;
+            if (t - this.startT < this.cfg.minRepMs) return null;
+            this.n += 1;
+            return { index: this.n, startT: this.startT, turnT: t, endT: t, outMs: t - this.startT, backMs: 0 };
+          }
+          this.inner = 'turned';
         } else if (s > x) {
           this.inner = 'rest';
           this.armed = true;
