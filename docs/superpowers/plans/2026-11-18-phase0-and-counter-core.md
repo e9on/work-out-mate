@@ -4,9 +4,9 @@
 
 **Goal:** 설계 문서의 Phase 0(실기기 검증)과 Phase 1(플랫폼 무관 카운터 코어)을 만든다. 끝나면 갤럭시 S23·PC에서 자세 인식이 쓸 만한지 판단할 수 있고, 6가지 운동(스쿼트·푸시업·덤벨 벤치프레스·턱걸이·네거티브·매달리기)을 녹화된 랜드마크로 세고 검증할 수 있다.
 
-**Architecture:** npm workspaces 모노레포. `packages/core`는 DOM·Capacitor·Tauri를 모르는 순수 TypeScript이고 Vitest로 테스트한다. `apps/spike`는 버리는 검증 앱(Vite + 순수 TS)이며 Capacitor(Android)와 Tauri(PC)로 감싼다. 스파이크 앱의 랜드마크 녹화 기능으로 만든 JSON이 코어 임계값 조정과 합격 테스트의 입력이 된다.
+**Architecture:** npm workspaces 모노레포. `packages/core`는 DOM·Capacitor·Electron을 모르는 순수 TypeScript이고 Vitest로 테스트한다. `apps/spike`는 버리는 검증 앱(Vite + 순수 TS)이며 Capacitor(Android)와 Electron(PC)으로 감싼다. 스파이크 앱의 랜드마크 녹화 기능으로 만든 JSON이 코어 임계값 조정과 합격 테스트의 입력이 된다.
 
-**Tech Stack:** TypeScript 5, Vite, Vitest, `@mediapipe/tasks-vision` 1.2.x, Capacitor 8.x, `@capacitor-community/text-to-speech`, Tauri 2.12+
+**Tech Stack:** TypeScript 5, Vite, Vitest, `@mediapipe/tasks-vision` 1.2.x, Capacitor 8.x, `@capacitor-community/text-to-speech`, Electron 45
 
 **Spec:** `docs/specs/2026-11-18-work-out-mate-mvp-design.md`
 
@@ -15,7 +15,7 @@
 ## Global Constraints
 
 - 서버·클라우드 없음. 실행 중 네트워크 요청 0건 (MediaPipe wasm·모델은 앱 안에 번들)
-- `packages/core`는 `window`, `document`, `@capacitor/*`, `@tauri-apps/*`를 import하지 않는다
+- `packages/core`는 `window`, `document`, `@capacitor/*`, `electron`을 import하지 않는다
 - 기준 기기: Android 갤럭시 S23, PC는 개발 PC 웹캠
 - 합격 기준: 10회 세트마다 손으로 센 횟수와 **±1회 이내**, 매달리기는 **±1초 이내**, 네거티브는 횟수만 판정
 - 덤벨 벤치프레스는 양팔 동시
@@ -42,7 +42,7 @@
 work-out-mate/
   package.json                 # npm workspaces: packages/*, apps/*
   tsconfig.base.json
-  .gitignore                   # node_modules, dist, **/fixtures/private/, src-tauri/target, android/build
+  .gitignore                   # node_modules, dist, **/fixtures/private/, out/, electron-dist/, android/build
   packages/core/
     package.json  tsconfig.json  vitest.config.ts
     src/
@@ -64,7 +64,7 @@ work-out-mate/
     src/main.ts  src/pose.ts  src/recorder.ts  src/speech.ts  src/hud.ts
     public/mediapipe/          # wasm + pose_landmarker_{lite,full}.task (번들)
     capacitor.config.ts  android/   (cap add android 산출물)
-    src-tauri/                 (tauri init 산출물)
+    electron/                  (main.ts, preload.ts — Electron 메인 프로세스)
   docs/phase0-results.md       # Phase 0 측정 결과 기록
 ```
 
@@ -294,20 +294,20 @@ TDD 대상이 아니다. 완료 기준은 아래 수동 확인.
 - [ ] **Step 1: 사용자 허락 받고 자산 준비** — `npm i @mediapipe/tasks-vision@1.2.x` 후 `node_modules/@mediapipe/tasks-vision/wasm/*`를 `public/mediapipe/wasm/`로 복사. 모델 `pose_landmarker_lite.task`, `pose_landmarker_full.task`를 Google 공식 저장소(`storage.googleapis.com/mediapipe-models/pose_landmarker/...`)에서 받는다 — **받기 전에 파일명·출처·크기를 사용자에게 알리고 허락받는다.**
 - [ ] **Step 2: 화면 구성** — 카메라 `<video>`, 랜드마크 오버레이 `<canvas>`, 컨트롤: 운동 선택(6종), 모델(lite/full), delegate(GPU/CPU), 녹화 시작/정지, 음성 테스트 버튼. HUD: FPS(최근 1초 처리 프레임), 추론 ms(평균·p95), 현재 count/heldMs/paused.
 - [ ] **Step 3: 추론 루프** — `FilesetResolver.forVisionTasks('/mediapipe/wasm')`, `modelAssetPath: '/mediapipe/pose_landmarker_<m>.task'`, `runningMode: 'VIDEO'`, `requestVideoFrameCallback`(없으면 rAF)마다 `detectForVideo`. 이전 추론이 안 끝났으면 그 프레임은 건너뛴다. 결과를 `PoseFrame`으로 바꿔 tracker에 push.
-- [ ] **Step 4: 녹화** — 녹화 중 `PoseFrame`을 모아 `RecordingFile`로 저장. 브라우저/Tauri는 다운로드, Android는 Filesystem 플러그인으로 Documents에 저장(Task 9에서 연결).
+- [ ] **Step 4: 녹화** — 녹화 중 `PoseFrame`을 모아 `RecordingFile`로 저장. 브라우저/Electron은 다운로드, Android는 Filesystem 플러그인으로 Documents에 저장(Task 9에서 연결).
 - [ ] **Step 5: 음성** — `speech.ts`의 `speak(text: string): Promise<'ok'|'unsupported'>`: Capacitor 네이티브면 TTS 플러그인(`lang: 'ko-KR'`), 아니면 `speechSynthesis`에서 `ko` 음성 선택. 음성 목록을 HUD에 표시.
 - [ ] **Step 6: 수동 확인 (PC Chrome, `npm run dev -w apps/spike`)** — 웹캠 켜짐, 랜드마크 표시, 스쿼트 3회 → count 3, 녹화 파일을 Task 7 CLI로 재생 → 같은 count. DevTools Network에서 MediaPipe 관련 외부 요청 0건.
 - [ ] **Step 7: 커밋** — `chore(spike): Phase 0 검증용 스파이크 앱`
 
-### Task 9: Tauri(PC)·Capacitor(Android)로 감싸서 측정
+### Task 9: Electron(PC)·Capacitor(Android)로 감싸서 측정
 
-**선행 (사용자가 직접 설치, 각각 허락 후 진행):** Rust(rustup), Microsoft C++ Build Tools(Tauri 요구 시), JDK 21, Android Studio(이미 있는 SDK 폴더 재사용), S23 USB 디버깅 켜기.
+**선행 (사용자가 직접 설치, 각각 허락 후 진행):** JDK 21(Electron은 npm 설치만으로 충분, Rust·C++ 빌드 도구 불필요), Android Studio(이미 있는 SDK 폴더 재사용), S23 USB 디버깅 켜기.
 
 **Files:**
-- Create: `apps/spike/capacitor.config.ts`, `apps/spike/android/`(cap add), `apps/spike/src-tauri/`(tauri init), `docs/phase0-results.md`
+- Create: `apps/spike/capacitor.config.ts`, `apps/spike/android/`(cap add), `apps/spike/electron/`(main.ts, preload.ts), `apps/spike/scripts/electron-*.mjs`, `docs/phase0-results.md`
 
 - [ ] **Step 1: Capacitor 연결** — `@capacitor/core@8 @capacitor/cli@8 @capacitor/android@8 @capacitor-community/text-to-speech @capacitor/filesystem @capacitor-community/keep-awake`, `npx cap add android`, `AndroidManifest.xml`에 `CAMERA` 권한. 빌드 후 S23에 설치.
-- [ ] **Step 2: Tauri 연결** — `npm create tauri-app` 대신 기존 Vite 앱에 `tauri init`(frontendDist `../dist`, devUrl `http://localhost:5173`). `tauri build`로 Windows 실행 파일.
+- [ ] **Step 2: Electron 연결** — `electron`, `@electron/packager`, `esbuild`를 devDependency로 고정. `dist/`를 `app://wom/` 커스텀 프로토콜로 서빙, 외부 요청 전부 차단, 카메라만 허용, 녹화는 문서/WorkOutMate에 저장. `npm run electron:pack -w apps/spike`로 Windows 폴더(`apps/spike/out/`).
 - [ ] **Step 3: 측정 (S23, PC 각각)** — `docs/phase0-results.md`에 표로 기록:
   - lite/full × GPU/CPU별 FPS, 추론 ms 평균·p95 (각 30초)
   - 카메라 권한: 첫 실행 허용 / 거부 후 재실행 동작

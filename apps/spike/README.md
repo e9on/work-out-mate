@@ -53,3 +53,28 @@ adb exec-out run-as com.workoutmate.spike cat files/<파일명> > <파일명>
 Windows PowerShell의 `>`는 출력을 문자열로 바꿔 깨질 수 있으니 Git Bash나 cmd에서 실행한다(JSON 텍스트라 대개 문제없지만 인코딩이 바뀔 수 있다).
 
 이 앱은 AndroidManifest에 INTERNET 권한이 없다(네트워크 요청 0건을 OS 수준에서 보장). 그래서 `cap run --live-reload`는 쓸 수 없다. 개발은 `dev:lan`(브라우저)으로 한다.
+
+## PC 앱 (Electron)
+
+웹 앱을 Electron(Chromium 포함)으로 감싼 Windows 앱이다. Tauri 대신 Electron을 쓴 이유는 설계 문서 맨 위 변경 메모를 본다. "준비"를 먼저 끝내야 한다.
+
+- 화면은 `dist/`를 `app://wom/` 커스텀 프로토콜로 서빙해서 연다(`file://`이 아님). wasm과 모델은 `/mediapipe/...` 절대 경로 그대로 풀린다.
+- 앱 프로토콜·devtools 외 요청(http, https, ws)은 전부 취소한다. 카메라(video) 권한만 허용한다.
+- 녹화 파일은 저장 대화상자 없이 `문서\WorkOutMate\wom-<운동>-<모델>-<날짜>.json` 에 저장된다(HUD에 실제 경로 표시). 폰과 달리 개발 서버로 보내지 않는다.
+
+```bash
+npm run electron:dev -w apps/spike    # 웹 빌드 + electron 빌드 후 창을 연다 (코드를 고친 뒤에는 다시 실행)
+npm run electron:pack -w apps/spike   # Windows 실행 폴더 생성: apps/spike/out/WorkOutMateSpike-win32-x64/ (약 400MB)
+```
+
+실행: `apps/spike/out/WorkOutMateSpike-win32-x64/WorkOutMateSpike.exe` 를 더블클릭. 폴더째로 옮겨도 된다. out/ 과 electron-dist/ 는 git에 넣지 않는다.
+
+카메라 없이 하는 자동 점검(창이 잠깐 떴다가 닫힌다). 로딩, 랜드마커 생성, 외부 요청 차단, 음성 목록, 녹화 저장을 확인해 터미널에 출력한다(녹화는 임시 폴더에 저장).
+
+```bash
+cd apps/spike
+WOM_SELFTEST=1 npx electron .                                   # electron:build 후
+WOM_SELFTEST=1 out/WorkOutMateSpike-win32-x64/WorkOutMateSpike.exe   # 포장된 exe
+```
+
+사용자 확인 순서: exe 실행 → "카메라 시작"(Windows 카메라 개인정보 설정이 꺼져 있으면 실패) → 처리 장치 GPU/CPU, lite/full로 FPS·추론 ms 확인 → "음성 테스트"(HUD 음성 목록에 Microsoft Heami가 보여야 함) → 녹화 시작/정지 → HUD의 저장 경로 확인. 패키지 앱에는 콘솔 보안 경고(CSP)가 나오지 않는다.

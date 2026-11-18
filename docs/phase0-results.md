@@ -63,7 +63,7 @@
 
 ## 6. 남은 확인
 
-- PC 앱(Tauri): Rust와 MSVC C++ 빌드 도구를 설치해야 한다.
+- PC 앱(Electron, 2026-11-18 Tauri에서 변경: Rust·MSVC 설치 부담과 WebView2 카메라 권한 불확실성 때문): 포장과 자동 점검은 통과했다(`app://` 로딩, 랜드마커 lite/full × GPU/CPU 생성, 외부 요청 차단, 한국어 음성 Microsoft Heami 목록 확인, 녹화 저장). 실카메라 동작과 PC 웹캠 FPS 측정은 사용자가 `apps/spike/README.md`의 PC 앱 절차로 확인해야 한다.
 - 덤벨 벤치프레스, 풀업 실측
 - 저사양 Android 속도 (MVP 범위 밖)
 - full 모델, CPU 비교
