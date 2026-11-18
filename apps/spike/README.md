@@ -42,4 +42,14 @@ JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" ANDROID_HOME="$LOCALAPPD
 ```
 
 폰에 설치: 폰에서 개발자 옵션 → USB 디버깅 켜기, USB 연결 후 허용 → `adb install -r app-debug.apk`
-(adb는 `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`). 앱에서 녹화하면 폰의 `Documents/` 폴더에 저장된다.
+(adb는 `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`). 앱에서 녹화하면 폰의 `Documents/` 폴더에 저장을 시도하고, 안 되면 앱 전용 폴더로 저장한다(HUD에 어느 쪽인지 표시).
+
+앱 전용 폴더에서 PC로 꺼내기(디버그 APK에서만 가능):
+
+```bash
+adb exec-out run-as com.workoutmate.spike cat files/<파일명> > <파일명>
+```
+
+Windows PowerShell의 `>`는 출력을 문자열로 바꿔 깨질 수 있으니 Git Bash나 cmd에서 실행한다(JSON 텍스트라 대개 문제없지만 인코딩이 바뀔 수 있다).
+
+이 앱은 AndroidManifest에 INTERNET 권한이 없다(네트워크 요청 0건을 OS 수준에서 보장). 그래서 `cap run --live-reload`는 쓸 수 없다. 개발은 `dev:lan`(브라우저)으로 한다.

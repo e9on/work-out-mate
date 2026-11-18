@@ -55,16 +55,24 @@ export async function sendRecordingToPc(file: RecordingFile): Promise<string | n
 
 export const isNativeApp = Capacitor.isNativePlatform();
 
-/** 네이티브 앱: 폰의 문서(Documents) 폴더에 저장한다. 저장 위치 문자열을 돌려준다. */
+/**
+ * 네이티브 앱: 먼저 문서(Documents) 폴더에 저장하고, 실패하면 앱 전용 폴더(Data, 권한 불필요)에 다시 저장한다.
+ * 저장된 위치를 한국어 문자열로 돌려준다. 둘 다 실패할 때만 오류를 던진다.
+ */
 export async function saveRecordingNative(file: RecordingFile): Promise<string> {
   const name = recordingFileName(file);
-  const res = await Filesystem.writeFile({
-    path: name,
-    data: JSON.stringify(file),
-    directory: Directory.Documents,
-    encoding: Encoding.UTF8,
-  });
-  return `Documents/${name} (${res.uri})`;
+  const data = JSON.stringify(file);
+  try {
+    const res = await Filesystem.writeFile({ path: name, data, directory: Directory.Documents, encoding: Encoding.UTF8 });
+    return `문서 폴더 Documents/${name} (${res.uri})`;
+  } catch (e1) {
+    try {
+      const res = await Filesystem.writeFile({ path: name, data, directory: Directory.Data, encoding: Encoding.UTF8 });
+      return `앱 전용 폴더 files/${name} (${res.uri}) - 문서 폴더 저장 실패: ${e1 instanceof Error ? e1.message : String(e1)}`;
+    } catch (e2) {
+      throw new Error(`문서 폴더와 앱 전용 폴더 모두 저장 실패 (${e2 instanceof Error ? e2.message : String(e2)})`);
+    }
+  }
 }
 
 /** 브라우저 다운로드로 저장. */
