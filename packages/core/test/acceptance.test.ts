@@ -11,6 +11,9 @@ type ManifestEntry = {
   exercise: ExerciseId;
   expectedCount?: number;
   expectedHeldMs?: number;
+  /** 회귀 기준: 지금 replay 결과와 정확히 같아야 한다. 사람이 센 값과 다를 수 있다. */
+  expectedReplayCount?: number;
+  expectedReplayHeldMs?: number;
   note: string;
 };
 
@@ -42,6 +45,17 @@ describe('합격 테스트 (실제 녹화)', () => {
           Math.abs(r.heldMs - entry.expectedHeldMs),
           `${entry.file}: 버틴 시간 기대 ${entry.expectedHeldMs}ms, 실제 ${r.heldMs}ms (허용 ±1000ms)`,
         ).toBeLessThanOrEqual(1000);
+      }
+      // 회귀 기준: 사람이 센 값과 별개로, 코드가 바뀌어 replay 결과가 달라지면 잡는다.
+      if (entry.expectedReplayCount !== undefined) {
+        expect(r.count, `${entry.file}: replay 횟수 회귀 (기대 ${entry.expectedReplayCount}, 실제 ${r.count})`).toBe(
+          entry.expectedReplayCount,
+        );
+      }
+      if (entry.expectedReplayHeldMs !== undefined) {
+        expect(r.heldMs, `${entry.file}: replay 버틴 시간 회귀 (기대 ${entry.expectedReplayHeldMs}ms, 실제 ${r.heldMs}ms)`).toBe(
+          entry.expectedReplayHeldMs,
+        );
       }
     });
   }
