@@ -4,3 +4,4 @@ dist/
 **/fixtures/private/
 src-tauri/target/
 android/build/
+apps/spike/public/mediapipe/
