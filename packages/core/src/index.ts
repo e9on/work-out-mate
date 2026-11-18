@@ -2,3 +2,5 @@ export type { Landmark, PoseFrame } from './types';
 export { LM } from './types';
 export { jointAngle } from './pose/angles';
 export { Ema, visibleEnough } from './pose/signal';
+export { RepCounter } from './counter/repCounter';
+export type { RepConfig, RepPhase, RepEvent } from './counter/repCounter';

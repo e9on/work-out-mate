@@ -1,0 +1,102 @@
+export type RepConfig = {
+  /** 시작 자세에서 신호가 큰 쪽('high')인지 작은 쪽('low')인지 */
+  restSide: 'high' | 'low';
+  /** 이 값을 넘어가면(restSide 반대 방향) '동작 중' */
+  enter: number;
+  /** 이 값까지 가야 '반환점 도달' */
+  turn: number;
+  /** 다시 이 값을 넘어 돌아오면 1회 확정 (enter와 히스테리시스) */
+  exit: number;
+  /** 나감·돌아옴 각 구간 최소 시간(ms) */
+  minPhaseMs: number;
+  /** 신호 null이 이만큼 이어지면 진행 중 반복을 버림(ms) */
+  pauseAfterMs: number;
+};
+
+export type RepPhase = 'rest' | 'out' | 'turned' | 'paused';
+
+export type RepEvent = {
+  index: number;
+  startT: number;
+  turnT: number;
+  endT: number;
+  outMs: number;
+  backMs: number;
+};
+
+type Inner = 'rest' | 'out' | 'turned';
+
+/**
+ * 상태 기계 기반 반복 카운터. 프레임마다 update(t, signal)을 한 번 부르면
+ * 그 자리에서 판단한다(미래 프레임을 기다리지 않음). 시간은 인자 t로만 본다.
+ */
+export class RepCounter {
+  private inner: Inner = 'rest';
+  private n = 0;
+  private startT = 0;
+  private turnT = 0;
+  private pausedSince: number | null = null;
+
+  constructor(private readonly cfg: RepConfig) {}
+
+  get count(): number {
+    return this.n;
+  }
+
+  get phase(): RepPhase {
+    return this.pausedSince !== null ? 'paused' : this.inner;
+  }
+
+  reset(): void {
+    this.inner = 'rest';
+    this.n = 0;
+    this.startT = 0;
+    this.turnT = 0;
+    this.pausedSince = null;
+  }
+
+  update(t: number, signal: number | null): RepEvent | null {
+    if (signal === null) {
+      if (this.pausedSince === null) this.pausedSince = t;
+      if (t - this.pausedSince >= this.cfg.pauseAfterMs) this.inner = 'rest';
+      return null;
+    }
+    if (this.pausedSince !== null) {
+      if (t - this.pausedSince >= this.cfg.pauseAfterMs) this.inner = 'rest';
+      this.pausedSince = null;
+    }
+
+    const { enter, turn, exit } = this.cfg;
+    // 'high'면 값이 작아지는 쪽이 동작 방향. 'low'는 부호를 뒤집어 같은 식으로 비교한다.
+    const s = this.cfg.restSide === 'high' ? signal : -signal;
+    const e = this.cfg.restSide === 'high' ? enter : -enter;
+    const tn = this.cfg.restSide === 'high' ? turn : -turn;
+    const x = this.cfg.restSide === 'high' ? exit : -exit;
+
+    switch (this.inner) {
+      case 'rest':
+        if (s < e) {
+          this.inner = 'out';
+          this.startT = t;
+        }
+        return null;
+      case 'out':
+        if (s <= tn) {
+          this.inner = 'turned';
+          this.turnT = t;
+        } else if (s > x) {
+          this.inner = 'rest';
+        }
+        return null;
+      case 'turned': {
+        if (s <= x) return null;
+        this.inner = 'rest';
+        const outMs = this.turnT - this.startT;
+        const backMs = t - this.turnT;
+        if (outMs < this.cfg.minPhaseMs || backMs < this.cfg.minPhaseMs) return null;
+        this.n += 1;
+        return { index: this.n, startT: this.startT, turnT: this.turnT, endT: t, outMs, backMs };
+      }
+    }
+  }
+}
