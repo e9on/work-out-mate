@@ -12,16 +12,23 @@ function lin(a: number, b: number, n: number): number[] {
 function oneRep(rest: number, bottom: number, n = 15): number[] {
   return [...Array(5).fill(rest), ...lin(rest, bottom, n), ...Array(3).fill(bottom), ...lin(bottom, rest, n), ...Array(5).fill(rest)];
 }
+/**
+ * 준비 자세 v에서 약 1초(30프레임) 정지. squat·pushup·dumbbellBench는 준비 자세를 기준으로
+ * 보정(700ms 정지)한 뒤에 세므로 합성 반복 앞에 붙인다.
+ */
+function ready(v: number): number[] {
+  return Array(30).fill(v);
+}
 
 describe('운동 6종: 완전한 1회', () => {
   it('squat: 무릎 175→90→175', () => {
-    expect(replay('squat', series(oneRep(175, 90), 'knee')).count).toBe(1);
+    expect(replay('squat', series([...ready(175), ...oneRep(175, 90)], 'knee')).count).toBe(1);
   });
   it('pushup: 팔꿈치 170→85→170', () => {
-    expect(replay('pushup', series(oneRep(170, 85), 'elbow')).count).toBe(1);
+    expect(replay('pushup', series([...ready(170), ...oneRep(170, 85)], 'elbow')).count).toBe(1);
   });
   it('dumbbellBench: 양팔 170→85→170', () => {
-    expect(replay('dumbbellBench', series(oneRep(170, 85), 'elbow')).count).toBe(1);
+    expect(replay('dumbbellBench', series([...ready(170), ...oneRep(170, 85)], 'elbow')).count).toBe(1);
   });
   it('pullup: 팔꿈치 170→70→170', () => {
     expect(replay('pullup', series(oneRep(170, 70), 'elbow')).count).toBe(1);
@@ -30,12 +37,17 @@ describe('운동 6종: 완전한 1회', () => {
     expect(replay('negative', series(oneRep(40, 170, 90), 'elbow')).count).toBe(1);
   });
   it('푸시업: 맨 위가 155°까지만 펴지고 바닥이 115°까지만 내려가는 반복 3회 → 3', () => {
-    // 실측(옆 바닥 촬영): 위 155~157, 바닥 90~114. 한 회 43프레임 x 33ms = 약 1.4초.
-    const v = [...oneRep(155, 115), ...oneRep(155, 115), ...oneRep(155, 115)];
+    // 실측(옆 바닥 촬영): 준비 자세 166~169, 위 155~157, 바닥 90~114. 한 회 43프레임 x 33ms = 약 1.4초.
+    const v = [...ready(168), ...oneRep(155, 115), ...oneRep(155, 115), ...oneRep(155, 115)];
+    expect(replay('pushup', series(v, 'elbow')).count).toBe(3);
+  });
+  it('푸시업: 카메라 각도로 전체가 −15° 밀려도(준비 153, 위 140, 바닥 100) 3회 → 3', () => {
+    // 고정 임계값(복귀>150)으로는 맨 위 140이 복귀선을 못 넘어 0이 된다.
+    const v = [...ready(153), ...oneRep(140, 100), ...oneRep(140, 100), ...oneRep(140, 100)];
     expect(replay('pushup', series(v, 'elbow')).count).toBe(3);
   });
   it('2회 연속이면 2', () => {
-    const v = [...oneRep(170, 85), ...oneRep(170, 85)];
+    const v = [...ready(170), ...oneRep(170, 85), ...oneRep(170, 85)];
     expect(replay('pushup', series(v, 'elbow')).count).toBe(2);
   });
 });
@@ -108,8 +120,8 @@ describe('deadHang', () => {
 
 describe('createTracker와 replay', () => {
   const cases: Array<[ExerciseId, ReturnType<typeof series>]> = [
-    ['squat', series(oneRep(175, 90), 'knee')],
-    ['pushup', series(oneRep(170, 85), 'elbow')],
+    ['squat', series([...ready(175), ...oneRep(175, 90)], 'knee')],
+    ['pushup', series([...ready(170), ...oneRep(170, 85)], 'elbow')],
     ['negative', series(oneRep(40, 170, 90), 'elbow')],
   ];
   it.each(cases)('%s: 프레임 단위 push 결과 = replay 결과', (id, frames) => {
@@ -125,7 +137,7 @@ describe('createTracker와 replay', () => {
 
   it('push는 각 프레임에서 즉시 현재 상태를 돌려준다', () => {
     const tr = createTracker('squat');
-    const frames = series(oneRep(175, 90), 'knee');
+    const frames = series([...ready(175), ...oneRep(175, 90)], 'knee');
     const counts = frames.map((f) => tr.push(f).count);
     // 완료 프레임 이전에는 0, 마지막에는 1. 중간에 줄어들지 않는다.
     expect(counts[0]).toBe(0);
@@ -161,12 +173,12 @@ describe('NaN 방어', () => {
     ['dumbbellBench', 85],
     ['negative', -1],
   ] as const)('%s: NaN 각도 프레임이 끼어도 이후 반복이 정상적으로 세진다', (id, bottom) => {
-    const v = id === 'negative' ? oneRep(40, 170, 90) : oneRep(170, bottom);
+    const v = id === 'negative' ? oneRep(40, 170, 90) : [...ready(170), ...oneRep(170, bottom)];
     expect(replay(id, poison(series(v, 'elbow'))).count).toBe(1);
   });
 
   it('squat도 마찬가지(무릎)', () => {
-    const frames = series(oneRep(175, 90), 'knee').map((f, i) => {
+    const frames = series([...ready(175), ...oneRep(175, 90)], 'knee').map((f, i) => {
       if (i !== 3) return f;
       const bad = buildPose({ t: f.t });
       for (const side of [0, 1]) {
@@ -229,5 +241,21 @@ describe('negative: 바닥에 닿는 즉시 센다', () => {
   it('위(40)에서 바닥(170)까지 내려가고 끝나도 1', () => {
     const v = [...Array(5).fill(40), ...lin(40, 170, 90), ...Array(10).fill(170)];
     expect(replay('negative', series(v, 'elbow')).count).toBe(1);
+  });
+});
+
+describe('준비 자세 보정 상태(TrackerState.calibrating)', () => {
+  it.each(['squat', 'pushup', 'dumbbellBench'] as const)('%s: 처음엔 calibrating, 1초 정지 뒤 false', (id) => {
+    const key = id === 'squat' ? 'knee' : 'elbow';
+    const tr = createTracker(id);
+    const frames = series(ready(170), key);
+    expect(tr.push(frames[0]!).calibrating).toBe(true);
+    let last = tr.state();
+    for (const f of frames.slice(1)) last = tr.push(f);
+    expect(last.calibrating).toBe(false);
+  });
+  it.each(['pullup', 'negative', 'deadHang'] as const)('%s: 보정 없음(항상 false)', (id) => {
+    const tr = createTracker(id);
+    expect(tr.push(buildPose({ t: 0, elbow: 170 })).calibrating).toBe(false);
   });
 });

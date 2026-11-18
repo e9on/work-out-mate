@@ -3,16 +3,22 @@ import { LM } from '../types';
 import { jointAngle } from '../pose/angles';
 import { visibleEnough } from '../pose/signal';
 import type { RepConfig } from '../counter/repCounter';
+import type { AdaptiveConfig } from '../counter/adaptiveRepCounter';
 import type { HoldConfig } from '../counter/holdTimer';
 
 export type ExerciseId = 'squat' | 'pushup' | 'dumbbellBench' | 'pullup' | 'negative' | 'deadHang';
 
-export type RepExerciseDef = {
+type RepExerciseBase = {
   id: Exclude<ExerciseId, 'deadHang'>;
   kind: 'reps';
   signal(f: PoseFrame): number | null;
-  rep: RepConfig;
 };
+/** 고정 임계값 카운터(RepCounter)를 쓰는 운동 */
+export type FixedRepExerciseDef = RepExerciseBase & { rep: RepConfig; adaptive?: never };
+/** 준비 자세 기준 카운터(AdaptiveRepCounter)를 쓰는 운동 */
+export type AdaptiveRepExerciseDef = RepExerciseBase & { adaptive: AdaptiveConfig; rep?: never };
+/** `def.adaptive`가 있으면 준비 자세 기준, 없으면 `def.rep` 고정 임계값. */
+export type RepExerciseDef = FixedRepExerciseDef | AdaptiveRepExerciseDef;
 export type HoldExerciseDef = {
   id: 'deadHang';
   kind: 'hold';
@@ -27,12 +33,17 @@ export const EMA_ALPHA = 0.5;
 // 임계값은 출발점이다. Task 10에서 녹화 데이터로 조정한다. 모아 두는 곳은 이 파일.
 const COMMON = { minRepMs: 500, pauseAfterMs: 1500 } as const;
 const REP_CFG = {
-  squat: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
-  pushup: { restSide: 'high', enter: 145, turn: 120, exit: 150, ...COMMON },
-  dumbbellBench: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
   pullup: { restSide: 'high', enter: 140, turn: 80, exit: 155, ...COMMON },
   negative: { restSide: 'low', enter: 100, turn: 140, exit: 95, countAt: 'turn', ...COMMON, minRepMs: 250 },
 } satisfies Record<string, RepConfig>;
+// 준비 자세 기준(Task 6b). 실측(S23): 푸시업 준비 166~169, 반복 사이 맨 위 155~157, 바닥 90~114.
+// 바닥 = 준비 자세 - depth, 시작 = 직전 최고점 - startDrop, 복귀 = 이번 최저점 + rebound.
+const CALIBRATE = { calibrateMs: 700, calibrateTol: 8, calibrateTimeoutMs: 3000 } as const;
+const ADAPTIVE_CFG = {
+  squat: { restSide: 'high', depth: 60, rebound: 35, startDrop: 10, defaultBaseline: 170, minBaseline: 150, ...CALIBRATE, ...COMMON },
+  pushup: { restSide: 'high', depth: 40, rebound: 30, startDrop: 10, defaultBaseline: 165, minBaseline: 140, ...CALIBRATE, ...COMMON },
+  dumbbellBench: { restSide: 'high', depth: 40, rebound: 30, startDrop: 10, defaultBaseline: 165, minBaseline: 140, ...CALIBRATE, ...COMMON },
+} satisfies Record<string, AdaptiveConfig>;
 const HOLD_CFG: HoldConfig = { startAfterMs: 300, graceMs: 500 };
 const MIN_VISIBILITY = 0.5;
 const DEAD_HANG_MIN_ELBOW = 150;
@@ -89,9 +100,9 @@ function deadHangHolding(f: PoseFrame): boolean | null {
 }
 
 export const EXERCISES: Record<ExerciseId, ExerciseDef> = {
-  squat: { id: 'squat', kind: 'reps', signal: (f) => betterSideAngle(f, L_LEG, R_LEG), rep: REP_CFG.squat },
-  pushup: { id: 'pushup', kind: 'reps', signal: armAngle, rep: REP_CFG.pushup },
-  dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: bothArmsMean, rep: REP_CFG.dumbbellBench },
+  squat: { id: 'squat', kind: 'reps', signal: (f) => betterSideAngle(f, L_LEG, R_LEG), adaptive: ADAPTIVE_CFG.squat },
+  pushup: { id: 'pushup', kind: 'reps', signal: armAngle, adaptive: ADAPTIVE_CFG.pushup },
+  dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: bothArmsMean, adaptive: ADAPTIVE_CFG.dumbbellBench },
   // 사용자 결정: 턱걸이는 팔꿈치 각도로만 판별한다(코·손목·철봉 위치는 보지 않음).
   pullup: { id: 'pullup', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.pullup },
   negative: { id: 'negative', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.negative },
