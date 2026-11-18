@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import type { ExerciseId, PoseFrame, RecordingFile } from '@wom/core';
 
 export class Recorder {
@@ -51,7 +53,21 @@ export async function sendRecordingToPc(file: RecordingFile): Promise<string | n
   }
 }
 
-/** 브라우저 다운로드로 저장. Android 저장은 Task 9. */
+export const isNativeApp = Capacitor.isNativePlatform();
+
+/** 네이티브 앱: 폰의 문서(Documents) 폴더에 저장한다. 저장 위치 문자열을 돌려준다. */
+export async function saveRecordingNative(file: RecordingFile): Promise<string> {
+  const name = recordingFileName(file);
+  const res = await Filesystem.writeFile({
+    path: name,
+    data: JSON.stringify(file),
+    directory: Directory.Documents,
+    encoding: Encoding.UTF8,
+  });
+  return `Documents/${name} (${res.uri})`;
+}
+
+/** 브라우저 다운로드로 저장. */
 export function downloadRecording(file: RecordingFile): string {
   const name = recordingFileName(file);
   const url = URL.createObjectURL(new Blob([JSON.stringify(file)], { type: 'application/json' }));

@@ -1,8 +1,10 @@
 import { createTracker, EXERCISES, type ExerciseId, type TrackerState } from '@wom/core';
 import { createLandmarker, detect, drawPose, type Delegate, type Landmarker, type ModelName } from './pose';
-import { Recorder, downloadRecording, sendRecordingToPc } from './recorder';
+import { Capacitor } from '@capacitor/core';
+import { KeepAwake } from '@capacitor-community/keep-awake';
+import { Recorder, downloadRecording, isNativeApp, saveRecordingNative, sendRecordingToPc } from './recorder';
 import { Hud, Stat } from './hud';
-import { listVoices, onVoicesChanged, speak } from './speech';
+import { listNativeVoices, listVoices, onVoicesChanged, speak } from './speech';
 
 // MediaPipe 1.2.3 내부 로거가 https://odml.pa.googleapis.com/v1/log 로 fetch를 보낸다.
 // 옵션으로 끌 방법이 없어서(조사 결과는 task-8-report.md) 이 주소로 가는 fetch는 막는다.
@@ -194,6 +196,7 @@ startBtn.onclick = async () => {
       audio: false,
     });
     await video.play();
+    if (Capacitor.isNativePlatform()) await KeepAwake.keepAwake().catch(() => undefined); // 운동 중 화면 꺼짐 방지
     recBtn.disabled = false;
     startBtn.textContent = '카메라 켜짐';
     await rebuild();
@@ -224,6 +227,14 @@ function stopRecording(): void {
     note = '녹화된 프레임이 없어 저장하지 않음';
     return;
   }
+  if (isNativeApp) {
+    note = `폰에 저장하는 중... (${file.frames.length}프레임)`;
+    saveRecordingNative(file).then(
+      (where) => { note = `폰에 저장: ${where} (${file.frames.length}프레임)`; refreshHud(); },
+      (e) => { note = `저장 실패: ${e instanceof Error ? e.message : String(e)}`; refreshHud(); },
+    );
+    return;
+  }
   note = `PC로 보내는 중... (${file.frames.length}프레임)`;
   void sendRecordingToPc(file).then((sent) => {
     if (sent) {
@@ -252,6 +263,15 @@ ttsBtn.onclick = async () => {
   note = r === 'ok' ? '음성 재생 완료' : '한국어 음성을 쓸 수 없음 (unsupported)';
   refreshHud();
 };
+
+// 카메라를 멈추는 버튼은 없다. 앱이 가려지거나 닫힐 때 화면 켜짐 유지를 푼다.
+if (Capacitor.isNativePlatform()) {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) void KeepAwake.allowSleep().catch(() => undefined);
+    else if (video.srcObject) void KeepAwake.keepAwake().catch(() => undefined);
+  });
+  void listNativeVoices().then((v) => { voices = v; refreshHud(); });
+}
 
 onVoicesChanged(() => {
   voices = listVoices();
