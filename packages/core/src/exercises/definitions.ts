@@ -14,9 +14,14 @@ type RepExerciseBase = {
   signal(f: PoseFrame): number | null;
 };
 /** 고정 임계값 카운터(RepCounter)를 쓰는 운동 */
-export type FixedRepExerciseDef = RepExerciseBase & { rep: RepConfig; adaptive?: never };
+export type FixedRepExerciseDef = RepExerciseBase & { rep: RepConfig; adaptive?: never; ready?: never };
 /** 준비 자세 기준 카운터(AdaptiveRepCounter)를 쓰는 운동 */
-export type AdaptiveRepExerciseDef = RepExerciseBase & { adaptive: AdaptiveConfig; rep?: never };
+export type AdaptiveRepExerciseDef = RepExerciseBase & {
+  adaptive: AdaptiveConfig;
+  /** 이 프레임이 준비 자세인지(보정 중에만 쓴다). 판단할 관절이 안 보이면 null */
+  ready(f: PoseFrame): boolean | null;
+  rep?: never;
+};
 /** `def.adaptive`가 있으면 준비 자세 기준, 없으면 `def.rep` 고정 임계값. */
 export type RepExerciseDef = FixedRepExerciseDef | AdaptiveRepExerciseDef;
 export type HoldExerciseDef = {
@@ -47,6 +52,8 @@ const ADAPTIVE_CFG = {
 const HOLD_CFG: HoldConfig = { startAfterMs: 300, graceMs: 500 };
 const MIN_VISIBILITY = 0.5;
 const DEAD_HANG_MIN_ELBOW = 150;
+/** 준비 자세 확인: 몸통이 수평(푸시업·벤치) 또는 수직(스쿼트)에서 이 각도 이내 */
+const READY_TORSO_TOL_DEG = 35;
 
 type Triple = readonly [number, number, number];
 const L_ARM: Triple = [LM.L_SHOULDER, LM.L_ELBOW, LM.L_WRIST];
@@ -89,6 +96,39 @@ function meanVisibleArms(f: PoseFrame): number | null {
   return l ?? r;
 }
 
+/** 보이는(visibility ≥ 0.5) 점들의 image 좌표 평균. 하나도 안 보이면 null */
+function visibleMid(f: PoseFrame, idx: readonly number[]): { x: number; y: number } | null {
+  const pts = idx.map((i) => f.image[i]).filter((p) => p !== undefined && p.visibility >= MIN_VISIBILITY);
+  if (pts.length === 0) return null;
+  return { x: pts.reduce((s, p) => s + p!.x, 0) / pts.length, y: pts.reduce((s, p) => s + p!.y, 0) / pts.length };
+}
+
+/**
+ * 몸통(어깨 중점 → 엉덩이 중점, image 좌표)이 수평에서 기운 각도(0 = 수평, 90 = 수직).
+ * 한쪽 어깨·엉덩이만 보여도 그 점을 쓴다(옆에서 찍으면 먼 쪽이 가려지므로). 어깨나 엉덩이가 전혀 안 보이면 null.
+ * 이미지 크기를 모르므로 정규화 좌표 그대로 계산한다.
+ */
+function torsoTiltFromHorizontal(f: PoseFrame): number | null {
+  const sh = visibleMid(f, [LM.L_SHOULDER, LM.R_SHOULDER]);
+  const hip = visibleMid(f, [LM.L_HIP, LM.R_HIP]);
+  if (!sh || !hip) return null;
+  const dx = Math.abs(hip.x - sh.x), dy = Math.abs(hip.y - sh.y);
+  if (dx === 0 && dy === 0) return null;
+  return (Math.atan2(dy, dx) * 180) / Math.PI;
+}
+
+/** 엎드림·누움(푸시업·벤치): 몸통이 수평에서 35° 이내 */
+function lyingReady(f: PoseFrame): boolean | null {
+  const a = torsoTiltFromHorizontal(f);
+  return a === null ? null : a <= READY_TORSO_TOL_DEG;
+}
+
+/** 서 있음(스쿼트): 몸통이 수직에서 35° 이내 */
+function uprightReady(f: PoseFrame): boolean | null {
+  const a = torsoTiltFromHorizontal(f);
+  return a === null ? null : a >= 90 - READY_TORSO_TOL_DEG;
+}
+
 function deadHangHolding(f: PoseFrame): boolean | null {
   const needed = [LM.NOSE, ...L_ARM, ...R_ARM];
   if (!visibleEnough(f, needed, MIN_VISIBILITY)) return null;
@@ -100,9 +140,9 @@ function deadHangHolding(f: PoseFrame): boolean | null {
 }
 
 export const EXERCISES: Record<ExerciseId, ExerciseDef> = {
-  squat: { id: 'squat', kind: 'reps', signal: (f) => betterSideAngle(f, L_LEG, R_LEG), adaptive: ADAPTIVE_CFG.squat },
-  pushup: { id: 'pushup', kind: 'reps', signal: armAngle, adaptive: ADAPTIVE_CFG.pushup },
-  dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: bothArmsMean, adaptive: ADAPTIVE_CFG.dumbbellBench },
+  squat: { id: 'squat', kind: 'reps', signal: (f) => betterSideAngle(f, L_LEG, R_LEG), ready: uprightReady, adaptive: ADAPTIVE_CFG.squat },
+  pushup: { id: 'pushup', kind: 'reps', signal: armAngle, ready: lyingReady, adaptive: ADAPTIVE_CFG.pushup },
+  dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: bothArmsMean, ready: lyingReady, adaptive: ADAPTIVE_CFG.dumbbellBench },
   // 사용자 결정: 턱걸이는 팔꿈치 각도로만 판별한다(코·손목·철봉 위치는 보지 않음).
   pullup: { id: 'pullup', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.pullup },
   negative: { id: 'negative', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.negative },

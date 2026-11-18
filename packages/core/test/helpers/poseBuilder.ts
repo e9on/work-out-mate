@@ -12,6 +12,11 @@ export type PoseOpts = {
   visibility?: number;
   /** visibility를 0으로 만들 랜드마크 인덱스. */
   hidden?: number[];
+  /**
+   * image 좌표의 몸통(어깨·엉덩이) 방향. 기본 'upright'(어깨 위, 엉덩이 아래로 수직).
+   * 'flat'이면 어깨→엉덩이가 수평(엎드림·누움). world 좌표(각도 신호)는 바꾸지 않는다.
+   */
+  torso?: 'upright' | 'flat';
 };
 
 type P = [number, number];
@@ -45,7 +50,7 @@ function legPoints(side: number, knee: number): [P, P, P] {
 }
 
 export function buildPose(opts: PoseOpts): PoseFrame {
-  const { t, elbow = 170, knee = 175, wristAboveNose = false, visibility = 1, hidden = [] } = opts;
+  const { t, elbow = 170, knee = 175, wristAboveNose = false, visibility = 1, hidden = [], torso = 'upright' } = opts;
   const pts: P[] = Array.from({ length: 33 }, () => [...NOSE] as P);
   pts[0] = NOSE;
   // 얼굴: 눈(1~6), 귀(7,8), 입(9,10)
@@ -66,9 +71,15 @@ export function buildPose(opts: PoseOpts): PoseFrame {
     pts[29 + i] = add(a, [0, 0.01]); pts[31 + i] = add(a, [0.03 * side, 0.02]);
   });
 
-  const make = (): Landmark[] =>
-    pts.map(([x, y], i) => ({ x, y, z: 0, visibility: hidden.includes(i) ? 0 : visibility }));
-  return { t, image: make(), world: make() };
+  const make = (src: P[]): Landmark[] =>
+    src.map(([x, y], i) => ({ x, y, z: 0, visibility: hidden.includes(i) ? 0 : visibility }));
+  const imagePts = pts.map((p) => [...p] as P);
+  if (torso === 'flat') {
+    // 어깨(11,12)는 왼쪽, 엉덩이(23,24)는 오른쪽에 같은 높이로.
+    imagePts[11] = [0.3, 0.49]; imagePts[12] = [0.3, 0.51];
+    imagePts[23] = [0.6, 0.49]; imagePts[24] = [0.6, 0.51];
+  }
+  return { t, image: make(imagePts), world: make(pts) };
 }
 
 /** 각도 값 배열을 프레임 열로. key 각도만 values로 바꾸고 나머지는 extra를 따른다. */

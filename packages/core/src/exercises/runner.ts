@@ -13,7 +13,7 @@ export type TrackerState = {
   heldMs: number;
   paused: boolean;
   lastRep: RepEvent | null;
-  /** 준비 자세를 잡는 중(AdaptiveRepCounter의 phase === 'calibrating'). 그 외 운동은 항상 false */
+  /** 준비 자세를 잡는 중(AdaptiveRepCounter의 phase === 'calibrating', 신호가 끊겨도 유지). 그 외 운동은 항상 false */
   calibrating: boolean;
   /** 준비 자세 기준값(도). 준비 자세 기준 운동이 보정을 마친 뒤에만 숫자, 그 외 null */
   baseline: number | null;
@@ -46,13 +46,18 @@ export function createTracker(id: ExerciseId): Tracker {
   }
 
   const adaptive = def.adaptive ? new AdaptiveRepCounter(def.adaptive) : null;
-  const counter = adaptive ?? new RepCounter(def.rep!);
+  const fixed = def.adaptive ? null : new RepCounter(def.rep!);
+  const counter = (adaptive ?? fixed)!;
+  // 준비 자세 확인은 보정 중에만 필요하다. 보정이 끝나면 프레임마다 계산하지 않는다.
+  const readyOf = (f: PoseFrame): boolean | null =>
+    adaptive && !adaptive.calibrated && def.ready ? def.ready(f) : true;
   const ema = new Ema(EMA_ALPHA);
   let lastRep: RepEvent | null = null;
   const state = (): TrackerState => ({
     count: counter.count,
     heldMs: 0,
-    paused: counter.phase === 'paused',
+    // 보정 중 가림이면 calibrating과 paused가 둘 다 true다(phase는 'calibrating').
+    paused: adaptive ? adaptive.paused : counter.phase === 'paused',
     lastRep,
     calibrating: adaptive?.phase === 'calibrating',
     baseline: adaptive?.baseline ?? null,
@@ -62,7 +67,8 @@ export function createTracker(id: ExerciseId): Tracker {
       // NaN/Infinity가 Ema에 들어가면 이후 값이 영구히 NaN이 되므로 null로 바꿔 넣는다.
       const raw = def.signal(f);
       const safe = raw !== null && Number.isFinite(raw) ? raw : null;
-      const ev = counter.update(f.t, ema.next(safe));
+      const s = ema.next(safe);
+      const ev = adaptive ? adaptive.update(f.t, s, readyOf(f)) : fixed!.update(f.t, s);
       if (ev) lastRep = ev;
       return state();
     },

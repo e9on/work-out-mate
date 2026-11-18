@@ -216,3 +216,122 @@ describe('AdaptiveRepCounter: 그 밖의 동작', () => {
     expect(c.baseline).toBeNull();
   });
 });
+
+describe('수정 1회차: 재무장선·보정 타임아웃 기준점·준비 자세 확인·표본 수', () => {
+  it('재무장: 확정 직후 재무장선(base − depth/2)에 닿기 전 10~15° 다시 내려갔다 올라가도 추가 카운트 0', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    // 기준 168, 바닥선 128, 재무장선 148. 최저 95 → 125에서 확정(95+30).
+    const s = new Seq().hold(168, 1000).ramp(168, 95, 600).hold(95, 100).ramp(95, 128, 400); // 마지막 값 약 125.3
+    run(c, s.frames);
+    expect(c.count).toBe(1);
+    // 재무장 전에 125 → 112(−13°)로 내려갔다가 150까지 올라옴: 재무장 없으면 2회째로 셈
+    const s2 = new Seq(s.t).ramp(125, 112, 400).hold(112, 100).ramp(112, 150, 600).ramp(150, 168, 300).hold(168, 300);
+    run(c, s2.frames);
+    expect(c.count).toBe(1);
+  });
+
+  it('재무장: 재무장선을 지난 뒤의 정상 반복은 센다', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    const s = new Seq().hold(168, 1000).rep(168, 95).rep(168, 95);
+    run(c, s.frames);
+    expect(c.count).toBe(2);
+  });
+
+  it('재무장: 미달 복귀 뒤에도 재무장선을 지나야 다음 반복을 시작한다', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    // 기준 168, 바닥선 128, 재무장선 148. 1회(최저 95) 확정 뒤 150까지 올라와 무장(peak 150).
+    // 139로 내려가 시작(≤140) → 바닥 미달로 146까지 복귀(≥145): rest로 가며 재무장 필요(146 < 148).
+    // 그 상태에서 125까지 내려갔다 160으로 올라와도, 재무장 없으면 2회째로 센다.
+    const s = new Seq().hold(168, 1000).ramp(168, 95, 600).hold(95, 100).ramp(95, 150, 600)
+      .ramp(150, 139, 300).ramp(139, 146, 300).hold(146, 100)
+      .ramp(146, 125, 400).hold(125, 100).ramp(125, 160, 600).hold(160, 300);
+    run(c, s.frames);
+    expect(c.count).toBe(1);
+  });
+
+  it('보정 직후에도 재무장선 아래면 시작하지 않는다(타임아웃으로 바닥 근처에서 기본값 확정)', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    // 3초 동안 계속 움직이다 t≈3000에서 115 근처: 기본값 165, 재무장선 145.
+    // 그 뒤 115~135 사이에서만 흔들리면(재무장선 미만) 세지 않는다.
+    const s = new Seq();
+    for (let i = 0; i < 5; i++) s.ramp(115, 135, 300).ramp(135, 115, 300);
+    s.hold(115, 100);
+    for (let i = 0; i < 5; i++) s.ramp(115, 100, 300).ramp(100, 135, 400);
+    run(c, s.frames);
+    expect(c.calibrated).toBe(true);
+    expect(c.count).toBe(0);
+  });
+
+  it('타임아웃 기준점: 1초 보임 → 2초 가림 → 다시 보임 → 그 시점부터 3초 안에는 기본값으로 넘어가지 않는다', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    const moving = (seq: Seq, ms: number) => {
+      const end = seq.t + ms;
+      while (seq.t < end) seq.ramp(168, 120, 300).ramp(120, 168, 300);
+      return seq;
+    };
+    const s = moving(new Seq(), 1000).hold(null, 2000);
+    run(c, s.frames);
+    const back = s.t;
+    const s2 = moving(new Seq(back), 2900);
+    for (const [t, v] of s2.frames) {
+      c.update(t, v);
+      if (t < back + 3000) expect(c.calibrated, `t=${t - back}ms`).toBe(false);
+    }
+    expect(c.phase).toBe('calibrating');
+    // 다시 보인 뒤 3초가 지나면 기본값
+    run(c, moving(new Seq(s2.t), 600).frames);
+    expect(c.calibrated).toBe(true);
+    expect(c.baseline).toBe(165);
+  });
+
+  it('준비 자세 확인: ready false인 프레임은 보정에 쓰지 않고, 타임아웃도 흐르지 않는다', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    // 서 있는 자세(ready false)로 5초 가만히
+    for (let t = 0; t < 5000; t += DT) c.update(t, 170, false);
+    expect(c.calibrated).toBe(false);
+    expect(c.phase).toBe('calibrating');
+    // ready null(몸통이 안 보임)도 마찬가지
+    for (let t = 5000; t < 6000; t += DT) c.update(t, 170, null);
+    expect(c.calibrated).toBe(false);
+    // 준비 자세(ready true) 1초 → 보정
+    for (let t = 6000; t < 7000; t += DT) c.update(t, 166, true);
+    expect(c.calibrated).toBe(true);
+    expect(c.baseline).toBeCloseTo(166, 5);
+  });
+
+  it('준비 자세 확인: 보정 구간 중간에 ready false가 끼면 구간을 비운다', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    let t = 0;
+    for (; t < 400; t += DT) c.update(t, 168, true);
+    c.update(t, 168, false);
+    t += DT;
+    for (const end = t + 400; t < end; t += DT) c.update(t, 168, true);
+    expect(c.calibrated).toBe(false);
+  });
+
+  it('보정이 끝난 뒤에는 ready를 보지 않는다', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    run(c, new Seq().hold(168, 1000).frames);
+    let t = 1000;
+    for (const [, v] of new Seq().rep(168, 100).frames) c.update((t += DT), v, false);
+    expect(c.count).toBe(1);
+  });
+
+  it('보정 확정에는 표본 10개 이상이 필요하다(200ms 간격 5개로는 확정하지 않음)', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    for (let t = 0; t <= 800; t += 200) c.update(t, 168);
+    expect(c.calibrated).toBe(false);
+    // 이어서 33ms 간격으로 들어오면 확정
+    for (let t = 833; t < 1600; t += DT) c.update(t, 168);
+    expect(c.calibrated).toBe(true);
+  });
+
+  it('보정 중 null이어도 phase는 calibrating(HUD 안내 유지)', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    c.update(0, 168);
+    c.update(33, null);
+    expect(c.phase).toBe('calibrating');
+    for (let t = 66; t < 3000; t += DT) c.update(t, null);
+    expect(c.phase).toBe('calibrating');
+  });
+});

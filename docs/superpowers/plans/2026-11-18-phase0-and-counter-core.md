@@ -342,7 +342,13 @@ TDD 대상이 아니다. 완료 기준은 아래 수동 확인.
 **Files:** Create `packages/core/src/counter/adaptiveRepCounter.ts`, `packages/core/test/adaptiveRepCounter.test.ts` / Modify `definitions.ts`, `runner.ts`(`TrackerState.calibrating`·`baseline`), `index.ts`, `exercises.test.ts`, `test/fixtures/sample-squat-3.json`, `apps/spike/src/main.ts`·`hud.ts`
 
 - 적용: `squat`·`pushup`·`dumbbellBench` → `AdaptiveRepCounter`(정의에 `adaptive: AdaptiveConfig`). `pullup`·`negative`는 `rep: RepConfig` 그대로, `deadHang` 그대로.
-- 판정: 처음 700ms 동안 변동 ≤ 8°이고 평균 ≥ minBaseline이면 그 평균이 기준(못 잡으면 3초 뒤 defaultBaseline). 시작 = 직전 최고점 − startDrop, 바닥 = 기준 − depth, 복귀 = 이번 최저점 + rebound.
+- 보정: 준비 자세(ready true) 프레임만 쌓아, **가장 최근** 700ms 이상 구간에서 표본 10개 이상, 변동 ≤ 8°, 평균 ≥ minBaseline이 되는 순간 그 평균을 기준으로 정한다(세트 시작 직후가 아니어도 됨). null·ready false/null 프레임은 구간을 비운다. 구간이 마지막으로 비워진 뒤 첫 유효 신호부터 3초 안에 못 잡으면 defaultBaseline.
+- 판정: 시작 = 직전 최고점 − startDrop, 바닥 = 기준 − depth, 복귀 = 이번 최저점 + rebound.
+- 수정 1회차(검토 반영, 컨트롤러 결정):
+  - **재무장선 = 기준 − depth/2.** 확정·미달 복귀·보정 직후·오래 가림 뒤에는 신호가 이 선을 한 번 지나야 다음 반복을 시작한다. 근거: 확정 시점(최저 + rebound)이 바닥선과 거의 같아서(실측 pushup 6번째는 바닥선 123 아래 122에서 확정), 확정 직후 10~15°만 흔들려도 2회째로 셀 수 있었다.
+  - **타임아웃 기준점.** 첫 유효 신호가 아니라, 보정 구간이 마지막으로 비워진 뒤의 첫 유효 신호부터 잰다. 근거: 지나가다 잠깐 보인 순간이나 오래 가렸다 다시 보인 순간에 곧바로 기본값으로 확정되는 문제를 막는다.
+  - **준비 자세 확인 `ready(frame)`.** pushup·bench는 몸통(image 어깨 중점 → 엉덩이 중점)이 수평에서 35° 이내, squat은 수직에서 35° 이내다. 어깨나 엉덩이가 하나도 안 보이면 null이다. 보정 중에만 본다. 근거: 푸시업에서 서서 걸어올 때(팔꿈치 약 170°)로 보정되면, 엎드리며 굽혔다 펼 때 가짜 1회가 생긴다.
+  - 보정 중 가림이어도 `calibrating`은 true를 유지한다(`paused`도 true). HUD는 준비 자세 안내를 우선으로 보여 준다.
 
 | 운동 | depth | rebound | startDrop | defaultBaseline | minBaseline |
 |---|---|---|---|---|---|
@@ -353,7 +359,7 @@ TDD 대상이 아니다. 완료 기준은 아래 수동 확인.
 공통: calibrateMs 700, calibrateTol 8, calibrateTimeoutMs 3000, minRepMs 500, pauseAfterMs 1500. 지시서 초기값 그대로(조정 없음).
 
 - 근거: S23 실측에서 푸시업 준비 자세 166~169°, 반복 사이 맨 위 155~157°, 바닥 90~114°. 맨 위가 준비 자세보다 약 10° 덜 펴지므로 복귀는 준비 자세가 아니라 이번 최저점 기준으로 본다. 카메라 각도로 전체가 밀리는 경우(−15°)도 기준이 같이 밀려 센다.
-- 합격 테스트(실제 녹화 5개): 전부 통과. squat 6/5, negative 3, deadHang 13.8초는 이전과 같고, pushup은 5 → 6(기대 5, ±1 안). 늘어난 1회는 녹화 끝에서 녹화를 끄러 움직이는 구간(0.6초 만에 157→91→122 뒤 가림)이다.
+- 합격 테스트(실제 녹화 5개): 전부 통과. squat 6/5, negative 3, deadHang 13.8초는 이전과 같고, pushup은 5 → 6(기대 5, ±1 안). 늘어난 1회는 녹화 끝에서 녹화를 끄러 움직이는 구간(0.6초 만에 157→91→122 뒤 가림)이다. 맨 위 157에서 무장된 채 시작한 반복이라 재무장선으로는 막히지 않는다. 수정 1회차 뒤에도 결과는 같다. 보정은 squat 2.05초/171°, 2.54초/156°, pushup 2.87초/163°로 모두 준비 자세 확인을 통과해 잡혔다(타임아웃 없음).
 - 합성 테스트는 준비 자세(1초 정지)를 앞에 붙여야 센다. 기존 `exercises.test.ts`의 squat·pushup·bench 시나리오와 CLI 샘플 `sample-squat-3.json`(합성)에 1초 준비 자세를 붙였다.
 
 ---

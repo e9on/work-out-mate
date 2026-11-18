@@ -22,7 +22,8 @@ export class Hud {
   render(i: HudInfo): void {
     const s = i.state;
     const main = i.kind === 'hold' ? `버틴 시간 ${(s.heldMs / 1000).toFixed(1)}초` : `횟수 ${s.count}`;
-    const note = s.paused ? '  (일시정지)' : s.calibrating ? '  (준비 자세를 잡아 주세요)' : '';
+    // 보정 중에는 신호가 끊겨도(paused) 준비 자세 안내를 계속 보여 준다.
+    const note = s.calibrating ? '  (준비 자세를 잡아 주세요)' : s.paused ? '  (일시정지)' : '';
     this.big.textContent = `${main}${note}`;
     const ko = i.voices.filter((v) => /\(ko/i.test(v)).join(', ');
     this.box.textContent = [
