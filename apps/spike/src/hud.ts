@@ -2,6 +2,8 @@ import type { TrackerState } from '@wom/core';
 
 export type HudInfo = {
   state: TrackerState;
+  /** 'hold'(매달리기)면 버틴 초, 'reps'면 횟수만 보여 준다. */
+  kind: 'reps' | 'hold';
   fps: number;
   avgMs: number;
   p95Ms: number;
@@ -17,7 +19,8 @@ export class Hud {
 
   render(i: HudInfo): void {
     const s = i.state;
-    this.big.textContent = `횟수 ${s.count}  ·  매달림 ${(s.heldMs / 1000).toFixed(1)}초${s.paused ? '  (일시정지)' : ''}`;
+    const main = i.kind === 'hold' ? `버틴 시간 ${(s.heldMs / 1000).toFixed(1)}초` : `횟수 ${s.count}`;
+    this.big.textContent = `${main}${s.paused ? '  (일시정지)' : ''}`;
     const ko = i.voices.filter((v) => /\(ko/i.test(v)).join(', ');
     this.box.textContent = [
       `FPS(처리) ${i.fps}   추론 평균 ${i.avgMs.toFixed(1)}ms / p95 ${i.p95Ms.toFixed(1)}ms   건너뜀 ${i.skipped}`,

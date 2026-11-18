@@ -87,6 +87,7 @@ function refreshHud(): void {
   while (doneTimes.length && now - doneTimes[0]! > 1000) doneTimes.shift();
   hud.render({
     state,
+    kind: EXERCISES[exerciseSel.value as ExerciseId].kind,
     fps: doneTimes.length,
     avgMs: inferMs.avg(),
     p95Ms: inferMs.p95(),
