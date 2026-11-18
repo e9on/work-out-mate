@@ -28,7 +28,7 @@ export const EMA_ALPHA = 0.5;
 const COMMON = { minRepMs: 500, pauseAfterMs: 1500 } as const;
 const REP_CFG = {
   squat: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
-  pushup: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
+  pushup: { restSide: 'high', enter: 145, turn: 120, exit: 150, ...COMMON },
   dumbbellBench: { restSide: 'high', enter: 150, turn: 100, exit: 160, ...COMMON },
   pullup: { restSide: 'high', enter: 140, turn: 80, exit: 155, ...COMMON },
   negative: { restSide: 'low', enter: 100, turn: 140, exit: 95, countAt: 'turn', ...COMMON, minRepMs: 250 },

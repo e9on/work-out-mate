@@ -29,6 +29,11 @@ describe('운동 6종: 완전한 1회', () => {
   it('negative: 팔꿈치 40→170→40', () => {
     expect(replay('negative', series(oneRep(40, 170, 90), 'elbow')).count).toBe(1);
   });
+  it('푸시업: 맨 위가 155°까지만 펴지고 바닥이 115°까지만 내려가는 반복 3회 → 3', () => {
+    // 실측(옆 바닥 촬영): 위 155~157, 바닥 90~114. 한 회 43프레임 x 33ms = 약 1.4초.
+    const v = [...oneRep(155, 115), ...oneRep(155, 115), ...oneRep(155, 115)];
+    expect(replay('pushup', series(v, 'elbow')).count).toBe(3);
+  });
   it('2회 연속이면 2', () => {
     const v = [...oneRep(170, 85), ...oneRep(170, 85)];
     expect(replay('pushup', series(v, 'elbow')).count).toBe(2);
