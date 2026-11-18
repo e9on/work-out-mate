@@ -6,7 +6,7 @@
 
 **Architecture:** npm workspaces 모노레포. `packages/core`는 DOM·Capacitor·Electron을 모르는 순수 TypeScript이고 Vitest로 테스트한다. `apps/spike`는 버리는 검증 앱(Vite + 순수 TS)이며 Capacitor(Android)와 Electron(PC)으로 감싼다. 스파이크 앱의 랜드마크 녹화 기능으로 만든 JSON이 코어 임계값 조정과 합격 테스트의 입력이 된다.
 
-**Tech Stack:** TypeScript 5, Vite, Vitest, `@mediapipe/tasks-vision` 1.2.x, Capacitor 8.x, `@capacitor-community/text-to-speech`, Electron 45
+**Tech Stack:** TypeScript 7, Vite, Vitest, `@mediapipe/tasks-vision` 1.2.x, Capacitor 8.x, `@capacitor-community/text-to-speech`, Electron 45
 
 **Spec:** `docs/specs/2026-11-18-work-out-mate-mvp-design.md`
 
@@ -245,11 +245,11 @@ function replay(id: ExerciseId, frames: PoseFrame[]): TrackerState & { reps: Rep
 신호 정의 (좌우 중 관련 관절 평균 visibility가 높은 쪽 사용, 둘 다 0.5 미만이면 `null`, 각도는 `world` 좌표, EMA alpha 0.5):
 | id | 신호 | restSide | 초기 임계값 enter/turn/exit | 비고 |
 |---|---|---|---|---|
-| squat | 무릎 각도 (엉덩이-무릎-발목) | high | 150/100/160 | |
-| pushup | 팔꿈치 각도 | high | **145/120/150** | 근거: S23 옆 바닥 촬영 5회 실측에서 반복 사이 맨 위가 155~157(exit 160 미달), 바닥이 90~114(turn 100 미달 3회)라 실제 1회만 셌음 |
-| dumbbellBench | 양팔 팔꿈치 각도의 **평균** (양팔 동시) | high | 150/100/160 | 양팔 다 보여야 함, 한쪽만 보이면 null |
+| squat | 무릎 각도 (엉덩이-무릎-발목) | high | 150/100/160 | Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함) |
+| pushup | 팔꿈치 각도 | high | **145/120/150** | 근거: S23 옆 바닥 촬영 5회 실측에서 반복 사이 맨 위가 155~157(exit 160 미달), 바닥이 90~114(turn 100 미달 3회)라 실제 1회만 셌음 / Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함) |
+| dumbbellBench | 양팔 팔꿈치 각도의 **평균** (양팔 동시) | high | 150/100/160 | 양팔 다 보여야 함, 한쪽만 보이면 null. Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함). **위험(I3)**: 양팔이 모두 보여야 신호가 나오므로 측면 촬영에서는 0회가 될 수 있다. 실측 필요 |
 | pullup | **양팔 팔꿈치 각도 평균**(한쪽만 보이면 그쪽, 둘 다 안 보이면 null). 턱·철봉 위치는 보지 않음 — 사용자 결정 | high | 140/80/155 | |
-| negative | **양팔 팔꿈치 각도 평균**(pullup과 동일 규칙) | low | **100/140/95**, `countAt: 'turn'`, **minRepMs 250** | `RepEvent.outMs` = 내려온 시간. 근거: S23 실측 enter→turn이 284~387ms라 minRepMs 500이면 2·3번째가 버려져 250으로 낮춤(교정은 outMs로 따로). 또 위로 올라가는 동작은 점프라 마지막 반복이 안 세졌고 위로 올라가는 동작은 점프라 마지막 반복이 안 세졌고, 좌우 한쪽만 쓰면 덜 펴진 팔 때문에 turn에 못 닿았으며, 맨 위 양팔 평균이 53~85°(바닥 145~159°)였다 |
+| negative | **양팔 팔꿈치 각도 평균**(pullup과 동일 규칙) | low | **100/140/95**, `countAt: 'turn'`, **minRepMs 250** | `RepEvent.outMs` = 내려온 시간. 근거: S23 실측 enter→turn이 284~387ms라 minRepMs 500이면 2·3번째가 버려져 250으로 낮춤(교정은 outMs로 따로). 또 위로 올라가는 동작은 점프라 마지막 반복이 안 세졌고, 좌우 한쪽만 쓰면 덜 펴진 팔 때문에 turn에 못 닿았으며, 맨 위 양팔 평균이 53~85°(바닥 145~159°)였다 |
 | deadHang | holding = 두 손목이 코보다 위 && 양 팔꿈치 각도 ≥ 150 | — | startAfterMs 300, graceMs 500 | |
 
 모든 RepConfig: minRepMs 500(전체 반복 최소 시간), pauseAfterMs 1500. (구간별 minPhaseMs 250을 바꾼 이유: 실측에서 150→100° 구간이 0.19~0.23초라 정상 반복이 버려졌고, 실제 반복 전체는 1.26~1.63초였다.) **임계값은 출발점일 뿐이고 Task 10에서 녹화 데이터로 조정한다.**
@@ -326,10 +326,11 @@ TDD 대상이 아니다. 완료 기준은 아래 수동 확인.
 
 **Interfaces:**
 - Consumes: `replay`, `RecordingFile`
-- Produces: `manifest.json` 형식 `[{ file: string; exercise: ExerciseId; expectedCount?: number; expectedHeldMs?: number; note: string }]`
+- Produces: `manifest.json` 형식 `[{ file: string; exercise: ExerciseId; expectedCount?: number; expectedHeldMs?: number; expectedReplayCount?: number; expectedReplayHeldMs?: number; note: string }]`
 
 - [ ] **Step 1: 녹화 수집 (사용자 촬영)** — 스파이크 앱(S23 기준)으로 운동마다 10회 세트 2개 이상, 매달리기 2개 이상. 촬영하며 손으로 센 횟수·스톱워치 초를 `manifest.json`에 적는다. 일부러 반만 내려간 반복, 화면 밖으로 잠깐 나간 세트도 1개씩 넣는다.
 - [ ] **Step 2: 합격 테스트 작성** — manifest의 각 항목을 `replay` → `|count - expectedCount| <= 1`, `|heldMs - expectedHeldMs| <= 1000`. `manifest.json`이 없으면 `test.skip`.
+  - 기준은 둘이다. (1) 사람이 센 값 기준: `expectedCount ±1`, `expectedHeldMs ±1000`. (2) 회귀 기준: `expectedReplayCount`·`expectedReplayHeldMs`가 있으면 replay 결과가 정확히 같아야 한다(코드를 바꿔 결과가 달라졌는지 잡는 용도이고, 사람이 센 값과 다를 수 있다).
 - [ ] **Step 3: 실행해서 현재 성적 확인** — `npm test -w packages/core -- acceptance`. 실패 항목 기록.
 - [ ] **Step 4: 임계값 조정** — `npm run replay`로 신호 값을 보며 `definitions.ts` 수정. 바꾼 값마다 근거(어떤 녹화에서 무엇이 틀렸는지)를 커밋 메시지에 적는다. Task 6 단위 테스트도 계속 통과해야 한다.
 - [ ] **Step 5: 전부 통과 확인** — `npm test -w packages/core` → 전체 PASS. 통과 못 하는 운동은 `phase0-results.md`에 "보류"와 원인을 적는다.

@@ -1,7 +1,7 @@
 # Work Out Mate — MVP 설계 보고서
 
 - 작성일: 2026-11-18
-- 상태: 초안 (승인 전. 승인 전에는 코드·프로젝트 파일을 만들지 않는다)
+- 상태: 승인됨(2026-11-18), Phase 0 진행
 - 변경(2026-11-18): PC 앱 포장을 Tauri에서 Electron으로 바꿨다. 사유: Tauri는 Rust와 MSVC C++ 빌드 도구(수 GB) 설치가 필요하고, WebView2 카메라 권한 동작이 불확실했다. 이 PC의 Chromium(Chrome)에서 카메라와 한국어 음성(Microsoft Heami)이 이미 동작하는 것을 확인했다.
 - 근거: `초기 기획.docx`(2026-11-11), 초기 개발 지침, 2026-11-18 대화, 같은 날 웹 조사
 
@@ -87,7 +87,7 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
  │ Android (Capacitor 8) │               │ PC (Electron 45, Chromium)│
  │ PoseSource: MediaPipe │               │ PoseSource: MediaPipe 웹  │
  │   웹(WebView) → 느리면│               │ Speech: speechSynthesis   │
- │   네이티브 SDK 플러그인│              │ Storage: SQLite 플러그인  │
+ │   네이티브 SDK 플러그인│              │ Storage: main SQLite      │
  │ Speech: TTS 플러그인  │               │                           │
  │ Storage: SQLite 플러그인│             │                           │
  │ KeepAwake: 플러그인   │               │                           │
@@ -98,7 +98,7 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 설계 원칙
 - `core`는 DOM·Capacitor·Electron을 import하지 않는다. 입력은 "시각 + 33개 랜드마크(+visibility)"뿐이다. 그래서 녹화한 랜드마크 파일로 PC에서 테스트를 돌릴 수 있다.
 - `PoseSource`는 "프레임 → `{timestampMs, landmarks[33], worldLandmarks[33]}`" 형식만 내보낸다. 웹 MediaPipe든 네이티브 플러그인이든 같은 형식이다.
-- 저장소는 `Storage` 포트 뒤에 둔다. [제안] 양쪽 모두 SQLite 플러그인을 쓴다. 이유: 기록이 쌓이는 구조이고, IndexedDB보다 앱 삭제 전까지 보관이 확실하다.
+- 저장소는 `Storage` 포트 뒤에 둔다. [제안] Android는 Capacitor SQLite 플러그인, PC(Electron)는 main 프로세스 SQLite를 쓴다. 이유: 기록이 쌓이는 구조이고, IndexedDB보다 앱 삭제 전까지 보관이 확실하다.
 - 웹앱 파일(MediaPipe wasm·모델 포함)은 앱 안에 번들한다. 실행 중 네트워크를 쓰지 않는다.
 
 ## 5. 기술 스택과 선정 이유

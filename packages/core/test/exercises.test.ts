@@ -82,7 +82,7 @@ describe('dumbbellBench', () => {
 
 describe('negative', () => {
   it('outMs는 내려온(40→170) 구간 시간', () => {
-    // 100 초과 시점 ~ 140 이상 시점. 선형 40→170을 60프레임(약 2000ms)에 걸쳐 진행.
+    // 100 초과 시점 ~ 140 이상 시점. 선형 40→170을 90프레임(약 3000ms)에 걸쳐 진행.
     const n = 90;
     const frames = series(oneRep(40, 170, n), 'elbow');
     const r = replay('negative', frames);
