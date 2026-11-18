@@ -6,3 +6,5 @@ export { RepCounter } from './counter/repCounter';
 export type { RepConfig, RepPhase, RepEvent } from './counter/repCounter';
 export { HoldTimer } from './counter/holdTimer';
 export type { HoldConfig } from './counter/holdTimer';
+export { EXERCISES, createTracker, replay } from './exercises/runner';
+export type { ExerciseId, ExerciseDef, TrackerState } from './exercises/runner';
