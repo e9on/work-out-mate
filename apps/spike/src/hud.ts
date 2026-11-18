@@ -12,6 +12,8 @@ export type HudInfo = {
   recFrames: number | null;
   voices: string[];
   skipped: number;
+  /** 왜 안 세는지 보는 진단 줄 */
+  diag: string;
 };
 
 export class Hud {
@@ -23,6 +25,7 @@ export class Hud {
     this.big.textContent = `${main}${s.paused ? '  (일시정지)' : ''}`;
     const ko = i.voices.filter((v) => /\(ko/i.test(v)).join(', ');
     this.box.textContent = [
+      i.diag,
       `FPS(처리) ${i.fps}   추론 평균 ${i.avgMs.toFixed(1)}ms / p95 ${i.p95Ms.toFixed(1)}ms   건너뜀 ${i.skipped}`,
       `처리 장치 ${i.delegate}${i.note ? `   ${i.note}` : ''}`,
       `녹화 ${i.recFrames === null ? '꺼짐' : `${i.recFrames}프레임`}`,

@@ -82,6 +82,40 @@ async function rebuild(): Promise<void> {
   }
 }
 
+// --- 진단 표시 (왜 안 세는지 확인용) ---
+// 지금 신호값(스무딩 전), 이번 동작에서 가장 많이 굽힌 값, 운동 임계값, 좌우 관절 가시성을 보여 준다.
+let diag = '';
+let diagExtreme: number | null = null;
+let diagCount = 0;
+const VIS_IDX = { squat: [[23, 25, 27], [24, 26, 28]], arm: [[11, 13, 15], [12, 14, 16]] } as const;
+function updateDiag(frame: import('@wom/core').PoseFrame): void {
+  const id = exerciseSel.value as ExerciseId;
+  const def = EXERCISES[id];
+  const sides = id === 'squat' ? VIS_IDX.squat : VIS_IDX.arm;
+  const vis = sides
+    .map((ix, k) => `${k === 0 ? '왼' : '오'} ${ix.map((i) => (frame.image[i]?.visibility ?? 0).toFixed(2)).join('/')}`)
+    .join('  ');
+  if (def.kind !== 'reps') {
+    const h = def.holding(frame);
+    diag = `진단: 매달림 판정 ${h === null ? '안 보임' : h ? '예' : '아니오'}   가시성 ${vis}`;
+    return;
+  }
+  const s = def.signal(frame);
+  const r = def.rep;
+  if (state.count !== diagCount) {
+    diagCount = state.count;
+    diagExtreme = null;
+  }
+  if (s !== null) {
+    const deeper = r.restSide === 'high' ? s < (diagExtreme ?? Infinity) : s > (diagExtreme ?? -Infinity);
+    if (deeper) diagExtreme = s;
+  }
+  diag =
+    `진단: 신호 ${s === null ? '없음(안 보임)' : s.toFixed(0) + '°'}   이번 최저 ${diagExtreme === null ? '-' : diagExtreme.toFixed(0) + '°'}` +
+    `   기준 시작<${r.enter} 바닥<=${r.turn} 복귀>${r.exit}${r.restSide === 'low' ? '(반대 방향)' : ''}\n` +
+    `가시성(어깨·팔꿈치·손목 / 엉덩이·무릎·발목) ${vis}`;
+}
+
 function refreshHud(): void {
   const now = performance.now();
   while (doneTimes.length && now - doneTimes[0]! > 1000) doneTimes.shift();
@@ -96,6 +130,7 @@ function refreshHud(): void {
     recFrames: recorder.recording ? recorder.length : null,
     voices,
     skipped,
+    diag,
   });
 }
 
@@ -116,6 +151,7 @@ function onFrame(): void {
     const frame = detect(lm.landmarker, video, t);
     inferMs.add(performance.now() - t0);
     state = tracker.push(frame);
+    updateDiag(frame);
     recorder.add(frame);
     if (canvas.width !== video.videoWidth) {
       canvas.width = video.videoWidth;
