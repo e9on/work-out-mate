@@ -235,6 +235,12 @@ function stopRecording(): void {
     );
     return;
   }
+  if (window.wom?.isElectron) {
+    // PC 앱(Electron): 개발 서버가 없으므로 바로 다운로드. main이 문서/WorkOutMate 에 저장하고 경로를 알려 준다.
+    const name = downloadRecording(file);
+    note = `PC 앱 저장 중: ${name} (${file.frames.length}프레임)`;
+    return;
+  }
   note = `PC로 보내는 중... (${file.frames.length}프레임)`;
   void sendRecordingToPc(file).then((sent) => {
     if (sent) {
@@ -279,3 +285,64 @@ onVoicesChanged(() => {
 });
 
 refreshHud();
+
+window.wom?.onRecordingSaved((r) => {
+  note = r.ok ? `PC 앱 저장 완료: ${r.path}` : `PC 앱 저장 실패: ${r.path} (${r.error ?? '알 수 없음'})`;
+  refreshHud();
+});
+
+// 자동 점검(WOM_SELFTEST=1 로 Electron을 켰을 때만). 카메라 없이 로딩·랜드마커 생성·외부 차단·저장을 확인하고 콘솔로 보고한다.
+async function runSelfTest(): Promise<void> {
+  const say = (m: string): void => console.log(`[SELFTEST] ${m}`);
+  try {
+    say(`href=${location.href} secure=${isSecureContext}`);
+    for (const u of ['https://example.com/', 'http://example.com/', 'wss://example.com/']) {
+      try {
+        if (u.startsWith('ws')) {
+          await new Promise<void>((resolve, reject) => {
+            const w = new WebSocket(u);
+            w.onopen = () => resolve();
+            w.onerror = () => reject(new Error('ws error'));
+          });
+        } else {
+          await realFetch(u, { mode: 'no-cors' });
+        }
+        say(`외부 요청 통과(문제): ${u}`);
+      } catch (e) {
+        say(`외부 요청 실패(정상): ${u} (${e instanceof Error ? e.message : String(e)})`);
+      }
+    }
+    try {
+      await fetch('https://odml.pa.googleapis.com/v1/log');
+      say('텔레메트리 통과(문제)');
+    } catch (e) {
+      say(`텔레메트리 fetch 실패(정상): ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const wasm = await realFetch('/mediapipe/wasm/vision_wasm_internal.wasm');
+    say(`wasm fetch status=${wasm.status} type=${wasm.headers.get('content-type')}`);
+    const task = await realFetch('/mediapipe/pose_landmarker_lite.task', { method: 'HEAD' });
+    say(`task fetch status=${task.status} type=${task.headers.get('content-type')}`);
+    for (const m of ['lite', 'full'] as ModelName[]) {
+      for (const d of ['GPU', 'CPU'] as Delegate[]) {
+        const t0 = performance.now();
+        try {
+          const made = await createLandmarker(m, d);
+          say(`랜드마커 생성 성공 model=${m} 요청=${d} 실제=${made.delegate} fellBack=${made.fellBack} ${(performance.now() - t0).toFixed(0)}ms`);
+          made.landmarker.close();
+        } catch (e) {
+          say(`랜드마커 생성 실패 model=${m} 요청=${d}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+    say(`speechSynthesis 음성 ${speechSynthesis.getVoices().length}개: ${listVoices().slice(0, 8).join(', ')}`);
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    say(`장치 목록 ${devs.map((x) => x.kind).join(',') || '(없음)'}`);
+    const dummy = { version: 1 as const, device: 'selftest', exercise: 'squat' as ExerciseId, model: 'lite' as const, frames: [] };
+    downloadRecording(dummy);
+    await new Promise((r) => setTimeout(r, 2000));
+  } catch (e) {
+    say(`점검 중 예외: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
+  }
+  say('done');
+}
+if (window.wom?.selftest) void runSelfTest();
