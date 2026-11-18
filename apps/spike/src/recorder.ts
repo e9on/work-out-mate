@@ -32,6 +32,25 @@ export function recordingFileName(file: RecordingFile, d = new Date()): string {
   return `wom-${file.exercise}-${file.model}-${stamp}.json`;
 }
 
+/**
+ * 개발 서버(PC)로 녹화 파일을 보낸다. 같은 Wi-Fi 안의 PC에만 가고, PC는
+ * packages/core/test/fixtures/private/ 에 저장한다(vite.config.ts의 개발용 엔드포인트).
+ * 성공하면 저장된 파일 이름, 실패하면 null.
+ */
+export async function sendRecordingToPc(file: RecordingFile): Promise<string | null> {
+  const name = recordingFileName(file);
+  try {
+    const res = await fetch(`/__wom/recording?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(file),
+    });
+    return res.ok ? name : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 브라우저 다운로드로 저장. Android 저장은 Task 9. */
 export function downloadRecording(file: RecordingFile): string {
   const name = recordingFileName(file);

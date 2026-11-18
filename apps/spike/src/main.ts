@@ -1,6 +1,6 @@
 import { createTracker, EXERCISES, type ExerciseId, type TrackerState } from '@wom/core';
 import { createLandmarker, detect, drawPose, type Delegate, type Landmarker, type ModelName } from './pose';
-import { Recorder, downloadRecording } from './recorder';
+import { Recorder, downloadRecording, sendRecordingToPc } from './recorder';
 import { Hud, Stat } from './hud';
 import { listVoices, onVoicesChanged, speak } from './speech';
 
@@ -210,8 +210,16 @@ function stopRecording(): void {
     note = '녹화된 프레임이 없어 저장하지 않음';
     return;
   }
-  const name = downloadRecording(file);
-  note = `저장: ${name} (${file.frames.length}프레임)`;
+  note = `PC로 보내는 중... (${file.frames.length}프레임)`;
+  void sendRecordingToPc(file).then((sent) => {
+    if (sent) {
+      note = `PC로 보냄: ${sent} (${file.frames.length}프레임)`;
+    } else {
+      const name = downloadRecording(file);
+      note = `PC로 못 보내서 폰에 저장: ${name} (${file.frames.length}프레임)`;
+    }
+    refreshHud();
+  });
 }
 
 recBtn.onclick = () => {
