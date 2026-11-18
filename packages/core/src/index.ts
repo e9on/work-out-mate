@@ -8,3 +8,4 @@ export { HoldTimer } from './counter/holdTimer';
 export type { HoldConfig } from './counter/holdTimer';
 export { EXERCISES, createTracker, replay } from './exercises/runner';
 export type { ExerciseId, ExerciseDef, TrackerState } from './exercises/runner';
+export type { RecordingFile } from './recording';
