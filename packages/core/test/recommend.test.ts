@@ -49,3 +49,17 @@ describe('completedCount', () => {
     expect(completedCount('C', ss)).toBe(0);
   });
 });
+
+describe('recommendNext: 경계 동작 고정', () => {
+  it('완료 세션의 endedAt이 같으면 배열에서 먼저 나온 세션을 마지막으로 본다', () => {
+    // A·B가 같은 시각에 끝났으면 먼저 나온 A가 기준 → 다음은 B
+    expect(recommendNext(ROUTINES, [s('A', 100), s('B', 100)])!.id).toBe('B');
+    expect(recommendNext(ROUTINES, [s('B', 100), s('A', 100)])!.id).toBe('C');
+  });
+  it('order가 같으면 입력 배열 순서를 유지한다(안정 정렬)', () => {
+    const rs = [r('Y', 1), r('X', 1), r('Z', 2)];
+    expect(recommendNext(rs, [])!.id).toBe('Y');
+    expect(recommendNext(rs, [s('Y', 100)])!.id).toBe('X');
+    expect(recommendNext(rs, [s('X', 100)])!.id).toBe('Z');
+  });
+});

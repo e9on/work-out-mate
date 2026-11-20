@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RoutineRunner, type RoutineEvent } from '../src/session/routineRunner';
 import type { Routine, RoutineExercise, WorkoutSession } from '../src/session/model';
-import type { SetEvent } from '../src/session/setRunner';
+import type { SetConfig, SetEvent } from '../src/session/setRunner';
 import type { PoseFrame } from '../src/types';
 import { buildPose } from './helpers/poseBuilder';
 
@@ -99,9 +99,13 @@ const pu = (sets: number, reps: number, restSec: number): RoutineExercise => ({
   restSec,
 });
 
-function runner(exercises: RoutineExercise[], toEpoch?: (t: number) => number): Driver {
+function runner(
+  exercises: RoutineExercise[],
+  toEpoch?: (t: number) => number,
+  set: Partial<Omit<SetConfig, 'exercise' | 'target'>> = {},
+): Driver {
   return new Driver(
-    new RoutineRunner(routine(exercises), { startT: 0, sessionId: 's1', toEpoch, set: { countdownMs: 0 } }),
+    new RoutineRunner(routine(exercises), { startT: 0, sessionId: 's1', toEpoch, set: { countdownMs: 0, ...set } }),
   );
 }
 
@@ -220,7 +224,7 @@ describe('RoutineRunner: 쉬는 시간 이벤트', () => {
     expect(restTicks(d.log)).toEqual([50, 40, 30, 20, 10, 5, 4, 3, 2, 1]);
     const nu = ofType(d.log, 'nextUp');
     expect(nu).toHaveLength(1);
-    expect(nu[0]!.ev).toEqual({ type: 'nextUp', exercise: 'squat', setIndex: 1, target: { kind: 'reps', reps: 2 } });
+    expect(nu[0]!.ev).toEqual({ type: 'nextUp', exerciseIndex: 0, exercise: 'squat', setIndex: 1, target: { kind: 'reps', reps: 2 } });
     expect(nu[0]!.t - t0).toBeGreaterThanOrEqual(40000);
     expect(nu[0]!.t - t0).toBeLessThan(40000 + 100);
     // restTick은 올림한 남은 초가 그 값이 되는 첫 호출에서 나온다(남은 50초 이하 = 10초 지난 뒤 첫 tick)
@@ -265,7 +269,7 @@ describe('RoutineRunner: 쉬는 시간 이벤트', () => {
     expect(ofType(d.log, 'restStart').map((x) => x.ev.seconds)).toEqual([7]);
     const nu = ofType(d.log, 'nextUp');
     expect(nu.map((x) => x.ev)).toEqual([
-      { type: 'nextUp', exercise: 'pushup', setIndex: 0, target: { kind: 'reps', reps: 2 } },
+      { type: 'nextUp', exerciseIndex: 1, exercise: 'pushup', setIndex: 0, target: { kind: 'reps', reps: 2 } },
     ]);
   });
 
@@ -601,5 +605,177 @@ describe('RoutineRunner.paused', () => {
     d.stop();
     expect(d.rr.phase).toBe('done');
     expect(d.rr.paused).toBe(false);
+  });
+});
+
+describe('RoutineRunner: 수정 1회차', () => {
+  const dh = (sets: number, seconds: number, restSec: number): RoutineExercise => ({
+    exercise: 'deadHang',
+    sets,
+    target: { kind: 'seconds', seconds },
+    restSec,
+  });
+  /** 매달리기 프레임: hang이면 손목이 코 위(매달림), 아니면 손목이 코 아래 */
+  function hangFrames(d: Driver, ms: number, hang: boolean): void {
+    for (let i = 0; i < Math.ceil(ms / DT); i++) {
+      d.push(buildPose({ t: d.t, elbow: 170, wristAboveNose: hang }));
+      d.t += DT;
+    }
+  }
+
+  describe('저장 시각은 toEpoch 시계 하나', () => {
+    it('SetLog.startT·endT에도 toEpoch를 적용하고 restTakenMs는 그대로', () => {
+      const E = 1_000_000;
+      const d = runner([sq(2, 2, 3)], (t) => t + E);
+      d.doSet('squat', 2);
+      d.tickUntilRestEnd();
+      d.doSet('squat', 2);
+      const s = sessionOf(d.log);
+      const fins = d.log.filter((x) => isSetFinished(x.ev));
+      const starts = d.log.filter((x) => isSet('start')(x.ev));
+      for (let i = 0; i < 2; i++) {
+        expect(s.sets[i]!.startT).toBe(starts[i]!.t + E);
+        expect(s.sets[i]!.endT).toBe(fins[i]!.t + E);
+      }
+      expect(s.sets[1]!.restTakenMs).toBe(starts[1]!.t - fins[0]!.t);
+      expect(s.startedAt).toBe(E);
+    });
+  });
+
+  describe('쉬는 시간의 다음 세트 정보', () => {
+    it('스쿼트 → 푸시업 → 스쿼트: restStart.next, nextUp.exerciseIndex, SetLog.exerciseIndex', () => {
+      const d = runner([sq(2, 2, 30), pu(1, 2, 30), sq(1, 2, 30)]);
+      d.doSet('squat', 2);
+      d.tickUntilRestEnd();
+      d.doSet('squat', 2);
+      d.tickUntilRestEnd();
+      d.doSet('pushup', 2);
+      d.tickUntilRestEnd();
+      d.doSet('squat', 2);
+      const R2 = { kind: 'reps', reps: 2 };
+      expect(ofType(d.log, 'restStart').map((x) => x.ev)).toEqual([
+        { type: 'restStart', seconds: 30, next: { exerciseIndex: 0, setIndex: 1, exercise: 'squat', target: R2 } },
+        { type: 'restStart', seconds: 30, next: { exerciseIndex: 1, setIndex: 0, exercise: 'pushup', target: R2 } },
+        { type: 'restStart', seconds: 30, next: { exerciseIndex: 2, setIndex: 0, exercise: 'squat', target: R2 } },
+      ]);
+      expect(ofType(d.log, 'nextUp').map((x) => [x.ev.exerciseIndex, x.ev.exercise, x.ev.setIndex])).toEqual([
+        [0, 'squat', 1],
+        [1, 'pushup', 0],
+        [2, 'squat', 0],
+      ]);
+      const s = sessionOf(d.log);
+      expect(s.sets.map((x) => [x.exerciseIndex, x.exercise, x.setIndex])).toEqual([
+        [0, 'squat', 0],
+        [0, 'squat', 1],
+        [1, 'pushup', 0],
+        [2, 'squat', 0],
+      ]);
+      expect(s.completed).toBe(true);
+    });
+
+    it('sets 0인 운동은 건너뛰고 restStart.next는 그다음 운동', () => {
+      const d = runner([sq(1, 2, 30), pu(0, 2, 5), sq(1, 2, 25)]);
+      d.doSet('squat', 2);
+      const rs = ofType(d.log, 'restStart');
+      expect(rs.map((x) => [x.ev.seconds, x.ev.next.exerciseIndex, x.ev.next.exercise])).toEqual([[25, 2, 'squat']]);
+    });
+  });
+
+  describe('큰 tick 점프', () => {
+    it('nextUp 전에 쉬는 시간 끝을 한 번에 지나가면 restEnd 바로 앞에서 nextUp을 낸다', () => {
+      const d = runner([sq(2, 2, 60)]);
+      d.doSet('squat', 2);
+      const t0 = lastRestStartT(d);
+      expect(d.tick(t0 + 70000)).toEqual([
+        { type: 'nextUp', exerciseIndex: 0, exercise: 'squat', setIndex: 1, target: { kind: 'reps', reps: 2 } },
+        { type: 'restEnd' },
+      ]);
+    });
+
+    it('nextUp을 이미 냈으면 restEnd 앞에 다시 내지 않는다', () => {
+      const d = runner([sq(2, 2, 60)]);
+      d.doSet('squat', 2);
+      const t0 = lastRestStartT(d);
+      expect(d.tick(t0 + 45000).map((e) => e.type)).toEqual(['nextUp']);
+      expect(d.tick(t0 + 70000)).toEqual([{ type: 'restEnd' }]);
+    });
+  });
+
+  describe('sets가 정수가 아니면 내림', () => {
+    it('sets 2.5 → 2세트로 끝나고 completed true', () => {
+      const d = runner([sq(2.5, 2, 0)]);
+      d.doSet('squat', 2);
+      d.doSet('squat', 2);
+      expect(d.rr.phase).toBe('done');
+      const s = sessionOf(d.log);
+      expect(s.sets).toHaveLength(2);
+      expect(s.completed).toBe(true);
+    });
+
+    it('sets 0.5인 운동은 0세트로 건너뛴다(completed 판정 total에도 0)', () => {
+      const d = runner([pu(0.5, 2, 0), sq(1, 2, 0)]);
+      expect(d.rr.current).toEqual({ exerciseIndex: 1, setIndex: 0 });
+      d.doSet('squat', 2);
+      expect(sessionOf(d.log).completed).toBe(true);
+    });
+  });
+
+  it('backToReady 뒤에도 같은 세트 번호를 유지한다', () => {
+    const d = runner([sq(2, 2, 0)], undefined, { noStartMs: 2000 });
+    d.doSet('squat', 2);
+    expect(d.rr.current).toEqual({ exerciseIndex: 0, setIndex: 1 });
+    // 두 번째 세트: 준비 자세 → start → 2초 동안 반복 없음 → backToReady
+    d.frames('squat', hold(175, 4000), isSet('backToReady'));
+    const btr = ofType(d.log, 'set').filter((x) => x.ev.event.type === 'backToReady');
+    expect(btr.map((x) => [x.ev.exerciseIndex, x.ev.setIndex])).toEqual([[0, 1]]);
+    expect(d.rr.current).toEqual({ exerciseIndex: 0, setIndex: 1 });
+    expect(d.rr.phase).toBe('set');
+    d.doSet('squat', 2);
+    const s = sessionOf(d.log);
+    expect(s.sets.map((x) => x.setIndex)).toEqual([0, 1]);
+    expect(s.completed).toBe(true);
+  });
+
+  it('세트가 하나도 없는 루틴은 생성자에서 Error', () => {
+    const make = (xs: RoutineExercise[]) => () => new RoutineRunner(routine(xs), { startT: 0, sessionId: 's' });
+    expect(make([])).toThrow(Error);
+    expect(make([sq(0, 2, 10), pu(0.5, 2, 10)])).toThrow(Error);
+  });
+
+  it('마지막 운동의 쉬는 시간 중 skipExercise → restEnd → routineEnd(completed false)', () => {
+    const d = runner([sq(1, 2, 30), pu(2, 2, 30)]);
+    d.doSet('squat', 2);
+    d.tickUntilRestEnd();
+    d.doSet('pushup', 2);
+    expect(d.rr.phase).toBe('rest');
+    expect(d.skip().map((e) => e.type)).toEqual(['restEnd', 'routineEnd']);
+    const s = sessionOf(d.log);
+    expect(s.sets).toHaveLength(2);
+    expect(s.completed).toBe(false);
+  });
+
+  it('매달리기 세트를 skip하면 heldMs > 0으로 manual 기록', () => {
+    const d = runner([dh(2, 60, 30), sq(1, 2, 30)]);
+    hangFrames(d, 500, false);
+    hangFrames(d, 3000, true);
+    const evs = d.skip();
+    expect(evs.map((e) => e.type)).toEqual(['set', 'exerciseStart']);
+    d.doSet('squat', 2);
+    const s = sessionOf(d.log);
+    const h = s.sets[0]!;
+    expect([h.exercise, h.exerciseIndex, h.count, h.endReason]).toEqual(['deadHang', 0, 0, 'manual']);
+    expect(h.heldMs).toBeGreaterThan(2000);
+  });
+
+  it('매달리기 세트를 stop하면 heldMs > 0으로 manual 기록', () => {
+    const d = runner([dh(2, 60, 30)]);
+    hangFrames(d, 500, false);
+    hangFrames(d, 3000, true);
+    expect(d.stop().map((e) => e.type)).toEqual(['set', 'routineEnd']);
+    const s = sessionOf(d.log);
+    expect(s.sets).toHaveLength(1);
+    expect(s.sets[0]!.heldMs).toBeGreaterThan(2000);
+    expect(s.sets[0]!.endReason).toBe('manual');
+    expect(s.completed).toBe(false);
   });
 });

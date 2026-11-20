@@ -40,11 +40,16 @@ export type Routine = {
   updatedAt: number;
 };
 
-/** 세션에 담기는 세트 기록. restTakenMs = 이전 기록 세트의 endT부터 이 세트 startT까지(첫 세트는 null) */
-export type SetLog = SetResult & { setIndex: number; restTakenMs: number | null };
+/**
+ * 세션에 담기는 세트 기록.
+ * startT·endT는 RoutineRunner의 toEpoch로 바꾼 절대 시각이다(SetResult의 프레임 시계가 아니다).
+ * exerciseIndex는 루틴 안 운동 위치(같은 운동이 두 번 나와도 구분), setIndex는 그 운동 안 세트 번호.
+ * restTakenMs = 이전 기록 세트의 endT부터 이 세트 startT까지(차이값이라 시계와 상관없음, 첫 기록 세트는 null).
+ */
+export type SetLog = SetResult & { exerciseIndex: number; setIndex: number; restTakenMs: number | null };
 
 /**
- * 루틴 한 번 진행한 기록. startedAt·endedAt은 RoutineRunner의 toEpoch로 바꾼 시각이다.
+ * 루틴 한 번 진행한 기록. startT/endT(각 SetLog)/startedAt/endedAt은 모두 toEpoch로 바꾼 절대 시각이다.
  * completed는 모든 운동의 모든 세트가 그만하기(manual) 아닌 사유로 끝나고 건너뛰기·그만하기가 없었을 때만 true.
  */
 export type WorkoutSession = {

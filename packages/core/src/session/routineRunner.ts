@@ -3,12 +3,22 @@ import type { ExerciseId } from '../exercises/runner';
 import { SetRunner, type SetConfig, type SetEvent } from './setRunner';
 import type { Routine, SetLog, SetResult, Target, WorkoutSession } from './model';
 
+/** 쉬는 시간 뒤에 할 세트 */
+export type NextSet = { exerciseIndex: number; setIndex: number; exercise: ExerciseId; target: Target };
+
+/**
+ * 루틴 진행 이벤트.
+ * - set: SetRunner 이벤트를 운동·세트 번호와 함께 감싼 것. 건너뛰기·그만하기로 반복이 0인 세트(count 0, heldMs 0)를
+ *   끝내면 set(finished)는 나오지만 세션에 기록되지 않는다. 그래서 앱은 finished의 result.count·heldMs를 보고
+ *   "세트 완료" 안내를 할지 정해야 한다.
+ * - restStart.next: 쉬는 시간 뒤 세트(다음이 없으면 restStart 자체가 없으므로 항상 있다).
+ */
 export type RoutineEvent =
   | { type: 'exerciseStart'; exerciseIndex: number; exercise: ExerciseId }
   | { type: 'set'; exerciseIndex: number; setIndex: number; event: SetEvent }
-  | { type: 'restStart'; seconds: number }
+  | { type: 'restStart'; seconds: number; next: NextSet }
   | { type: 'restTick'; remaining: number }
-  | { type: 'nextUp'; exercise: ExerciseId; setIndex: number; target: Target }
+  | { type: 'nextUp'; exerciseIndex: number; exercise: ExerciseId; setIndex: number; target: Target }
   | { type: 'restEnd' }
   | { type: 'routineEnd'; session: WorkoutSession };
 
@@ -208,16 +218,22 @@ export class RoutineRunner {
     return { type: 'exerciseStart', exerciseIndex: i, exercise: this.routine.exercises[i]!.exercise };
   }
 
+  /** i번 운동의 세트 수(정수가 아니면 내림, 음수는 0) */
+  private setsOf(i: number): number {
+    const n = Math.floor(this.routine.exercises[i]!.sets);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
   /** i 뒤로 세트가 1개 이상인 첫 운동 번호 */
   private nextExercise(i: number): number | null {
     const xs = this.routine.exercises;
-    for (let j = i + 1; j < xs.length; j++) if (xs[j]!.sets >= 1) return j;
+    for (let j = i + 1; j < xs.length; j++) if (this.setsOf(j) >= 1) return j;
     return null;
   }
 
   /** p 다음 세트(같은 운동의 다음 세트, 없으면 다음 운동의 첫 세트) */
   private nextPos(p: Pos): Pos | null {
-    if (p.setIndex + 1 < this.routine.exercises[p.exerciseIndex]!.sets) {
+    if (p.setIndex + 1 < this.setsOf(p.exerciseIndex)) {
       return { exerciseIndex: p.exerciseIndex, setIndex: p.setIndex + 1 };
     }
     const j = this.nextExercise(p.exerciseIndex);
@@ -253,6 +269,10 @@ export class RoutineRunner {
       ...r,
       target: { ...r.target },
       negativeDescentMs: [...r.negativeDescentMs],
+      // 저장 레코드는 toEpoch 시계 하나로 맞춘다. restTakenMs는 입력 시계 차이값(시계와 상관없음).
+      startT: this.toEpoch(r.startT),
+      endT: this.toEpoch(r.endT),
+      exerciseIndex: this.pos.exerciseIndex,
       setIndex: this.pos.setIndex,
       restTakenMs: this.prevEndT === null ? null : r.startT - this.prevEndT,
     });
@@ -275,7 +295,7 @@ export class RoutineRunner {
     const ms = restSec * 1000;
     this.ph = 'rest';
     this.rest = { t0: t, ms, startSec: Math.ceil(ms / 1000), pausedMs: 0, lastTick: null, nextUpSent: false, next };
-    out.push({ type: 'restStart', seconds: restSec });
+    out.push({ type: 'restStart', seconds: restSec, next: this.nextSet(next) });
     if (ms <= NEXT_UP_MS) this.nextUp(out);
   }
 
@@ -283,6 +303,8 @@ export class RoutineRunner {
     const r = this.rest!;
     const remaining = r.ms - (t - r.t0 - r.pausedMs);
     if (remaining <= 0) {
+      // 큰 tick 점프로 남은 20초를 건너뛰었어도 "다음은…" 안내를 놓치지 않게 restEnd 바로 앞에서 낸다.
+      this.nextUp(out);
       this.rest = null;
       out.push({ type: 'restEnd' });
       this.startSet(r.next, out);
@@ -301,8 +323,12 @@ export class RoutineRunner {
     const r = this.rest!;
     if (r.nextUpSent) return;
     r.nextUpSent = true;
-    const ex = this.routine.exercises[r.next.exerciseIndex]!;
-    out.push({ type: 'nextUp', exercise: ex.exercise, setIndex: r.next.setIndex, target: { ...ex.target } });
+    out.push({ type: 'nextUp', ...this.nextSet(r.next) });
+  }
+
+  private nextSet(p: Pos): NextSet {
+    const ex = this.routine.exercises[p.exerciseIndex]!;
+    return { exerciseIndex: p.exerciseIndex, setIndex: p.setIndex, exercise: ex.exercise, target: { ...ex.target } };
   }
 
   /** 다음 세트를 waitingReady로 시작한다. 운동이 바뀌면 exerciseStart */
@@ -317,7 +343,8 @@ export class RoutineRunner {
   private end(t: number, out: RoutineEvent[]): void {
     this.ph = 'done';
     this.rest = null;
-    const total = this.routine.exercises.reduce((n, x) => n + Math.max(0, x.sets), 0);
+    let total = 0;
+    for (let i = 0; i < this.routine.exercises.length; i++) total += this.setsOf(i);
     const completed =
       !this.interrupted && this.logs.length === total && this.logs.every((s) => s.endReason !== 'manual');
     const session: WorkoutSession = {
