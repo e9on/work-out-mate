@@ -356,10 +356,19 @@ describe('몸통 기울기는 world 좌표 기준(#3)', () => {
     expect(ready('squat', f)).toBe(false);
   });
 
-  it('world는 수평인데 image만 가로로 1.78배 늘려도 true', () => {
-    const base = withTorso(buildPose({ t: 0 }), 'world', HORIZ_S, HORIZ_H);
-    const stretched = withTorso(base, 'image', { x: 0.3, y: 0.4, z: 0 }, { x: 0.3 + 0.2 * 1.78, y: 0.5, z: 0 });
-    expect(ready('pushup', stretched)).toBe(true);
+  it('world 수평 + 세로 화면처럼 image를 세로로 늘려 45°로 보여도 lyingReady는 true', () => {
+    const f = withTorso(
+      withTorso(buildPose({ t: 0 }), 'world', HORIZ_S, HORIZ_H),
+      'image', { x: 0.3, y: 0.3, z: 0 }, { x: 0.5, y: 0.5, z: 0 },
+    );
+    expect(ready('pushup', f)).toBe(true);
+  });
+
+  it('world 50° 기울기를 image만 가로로 1.78배 늘려 약 29°로 보이게 해도 false', () => {
+    const t = deg(50);
+    const w = withTorso(buildPose({ t: 0 }), 'world', { x: 0, y: 0, z: 0 }, { x: 0.5 * Math.cos(t), y: 0.5 * Math.sin(t), z: 0 });
+    const f = withTorso(w, 'image', { x: 0.3, y: 0.3, z: 0 }, { x: 0.3 + 0.2 * 1.78, y: 0.5, z: 0 });
+    expect(ready('pushup', f)).toBe(false);
   });
 
   it('world 기준 수평에서 50° 기울면 image가 수평이어도 false', () => {
@@ -378,5 +387,32 @@ describe('몸통 기울기는 world 좌표 기준(#3)', () => {
   it('깊이(z) 방향으로 누운 몸통도 수평으로 본다', () => {
     const f = withTorso(buildPose({ t: 0 }), 'world', { x: 0, y: 0, z: -0.25 }, { x: 0, y: 0, z: 0.25 });
     expect(ready('pushup', f)).toBe(true);
+  });
+
+  describe('한쪽만 보일 때는 같은 쪽 어깨·엉덩이끼리 짝짓는다', () => {
+    const hideOf = (idx: number[]) => buildPose({ t: 0, hidden: idx });
+    // 기본 포즈: 어깨(11,12) y=0.3, 엉덩이(23,24) y=0.6 world 수직. 왼쪽/오른쪽을 서로 다른 z로 둬 반대편 짝이면 기울어 보이게 한다.
+    const skewed = (hidden: number[]) => {
+      const f = hideOf(hidden);
+      const world = f.world.map((p, i) => (i === LM.R_SHOULDER || i === LM.R_HIP ? { ...p, z: 0.3 } : p));
+      return { ...f, world };
+    };
+    it('왼쪽만 보임 -> 정상 판정(서 있음)', () => {
+      const f = skewed([LM.R_SHOULDER, LM.R_HIP]);
+      expect(ready('squat', f)).toBe(true);
+      expect(ready('pushup', f)).toBe(false);
+    });
+    it('왼쪽 어깨 + 오른쪽 엉덩이만 보임 -> null', () => {
+      const f = skewed([LM.R_SHOULDER, LM.L_HIP]);
+      expect(ready('squat', f)).toBeNull();
+      expect(ready('pushup', f)).toBeNull();
+    });
+    it('전부 숨김 -> null', () => {
+      const f = skewed([LM.L_SHOULDER, LM.R_SHOULDER, LM.L_HIP, LM.R_HIP]);
+      expect(ready('squat', f)).toBeNull();
+    });
+    it('양쪽 다 보이면 중점', () => {
+      expect(ready('squat', skewed([]))).toBe(true);
+    });
   });
 });

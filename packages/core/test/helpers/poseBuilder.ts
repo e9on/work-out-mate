@@ -83,6 +83,7 @@ export function buildPose(opts: PoseOpts): PoseFrame {
   const worldPts = pts.map((p) => [...p] as P);
   if (torso === 'flat') {
     // world 몸통도 수평: 엉덩이를 어깨(y≈0.3) 높이로 옆에 둔다. 어깨는 그대로 둬 팔 각도를 보존한다.
+    // 주의: 엉덩이만 옮겼으므로 flat 프레임의 world 무릎 각도는 비현실적이다(팔 각도·몸통 방향 시험 전용).
     worldPts[23] = [0.9, 0.3]; worldPts[24] = [0.9, 0.31];
   }
   return { t, image: make(imagePts), world: make(worldPts) };

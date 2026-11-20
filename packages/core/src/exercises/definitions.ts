@@ -90,28 +90,44 @@ function meanVisibleArms(f: PoseFrame): number | null {
   return l ?? r;
 }
 
-/** 보이는(image visibility ≥ 0.5) 점들의 world 좌표 평균. 하나도 안 보이면 null */
-function visibleMidWorld(f: PoseFrame, idx: readonly number[]): { x: number; y: number; z: number } | null {
-  const pts = idx
-    .filter((i) => (f.image[i]?.visibility ?? 0) >= MIN_VISIBILITY)
-    .map((i) => f.world[i])
-    .filter((p) => p !== undefined);
-  if (pts.length === 0) return null;
-  const n = pts.length;
-  return { x: pts.reduce((s, p) => s + p!.x, 0) / n, y: pts.reduce((s, p) => s + p!.y, 0) / n, z: pts.reduce((s, p) => s + p!.z, 0) / n };
+const vis = (f: PoseFrame, i: number) => f.image[i]?.visibility ?? 0;
+
+type P3 = { x: number; y: number; z: number };
+const mid3 = (a: P3, b: P3): P3 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+
+/**
+ * 몸통의 world 좌표 양 끝점(어깨 중점·엉덩이 중점). 가시성 판단은 image visibility, 좌표는 world를 쓴다
+ * (world에는 visibility 신뢰도가 없고, 화면 비율 왜곡은 image 좌표에만 있다).
+ * 양쪽 어깨·엉덩이가 모두 보이면 중점. 아니면 같은 쪽 어깨·엉덩이가 둘 다 보이는 쪽(두 점 visibility의
+ * 작은 값이 더 큰 쪽)을 쓴다. world에서 반대편끼리 짝지으면 z 차이가 섞여 기울기가 왜곡되기 때문이다.
+ * 같은 쪽 짝이 없으면 null.
+ */
+function torsoEndsWorld(f: PoseFrame): { sh: P3; hip: P3 } | null {
+  const ok = (i: number) => vis(f, i) >= MIN_VISIBILITY && f.world[i] !== undefined;
+  if ([LM.L_SHOULDER, LM.R_SHOULDER, LM.L_HIP, LM.R_HIP].every(ok)) {
+    return {
+      sh: mid3(f.world[LM.L_SHOULDER]!, f.world[LM.R_SHOULDER]!),
+      hip: mid3(f.world[LM.L_HIP]!, f.world[LM.R_HIP]!),
+    };
+  }
+  const sides = [[LM.L_SHOULDER, LM.L_HIP], [LM.R_SHOULDER, LM.R_HIP]] as const;
+  const usable = sides.filter(([s, h]) => ok(s) && ok(h));
+  if (usable.length === 0) return null;
+  const [s, h] = usable.reduce((best, c) =>
+    Math.min(vis(f, c[0]), vis(f, c[1])) > Math.min(vis(f, best[0]), vis(f, best[1])) ? c : best,
+  );
+  return { sh: f.world[s]!, hip: f.world[h]! };
 }
 
 /**
- * 몸통(어깨 중점 → 엉덩이 중점, world 좌표)이 수평면에서 기운 각도(0 = 수평, 90 = 수직).
+ * 몸통(어깨→엉덩이, world 좌표)이 수평면에서 기운 각도(0 = 수평, 90 = 수직).
  * world는 미터 단위라 화면 비율에 영향받지 않는다. 기울기 = atan2(|dy|, hypot(dx, dz)).
- * 한쪽 어깨·엉덩이만 보여도(image visibility 기준) 그 점을 쓴다(옆에서 찍으면 먼 쪽이 가려지므로).
- * 어깨나 엉덩이가 전혀 안 보이거나 값이 유한하지 않으면 null.
+ * 어깨나 엉덩이가 안 보이거나 값이 유한하지 않으면 null.
  */
 function torsoTiltFromHorizontal(f: PoseFrame): number | null {
-  const sh = visibleMidWorld(f, [LM.L_SHOULDER, LM.R_SHOULDER]);
-  const hip = visibleMidWorld(f, [LM.L_HIP, LM.R_HIP]);
-  if (!sh || !hip) return null;
-  const dy = Math.abs(hip.y - sh.y), dh = Math.hypot(hip.x - sh.x, hip.z - sh.z);
+  const e = torsoEndsWorld(f);
+  if (!e) return null;
+  const dy = Math.abs(e.hip.y - e.sh.y), dh = Math.hypot(e.hip.x - e.sh.x, e.hip.z - e.sh.z);
   if (dy === 0 && dh === 0) return null;
   const a = (Math.atan2(dy, dh) * 180) / Math.PI;
   return Number.isFinite(a) ? a : null;
