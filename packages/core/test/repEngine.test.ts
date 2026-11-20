@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { RepCounter, type RepConfig, type RepEvent } from '../src/counter/repCounter';
 import { AdaptiveRepCounter, type AdaptiveConfig } from '../src/counter/adaptiveRepCounter';
+import { RepEngine, type JudgeStrategy } from '../src/counter/repEngine';
+import { adaptiveStrategy, fixedStrategy } from '../src/counter/strategies';
 
 // 두 카운터는 기존 테스트와 같은 설정을 쓴다.
 const FIXED: RepConfig = { restSide: 'high', enter: 150, turn: 95, exit: 160, minRepMs: 500, pauseAfterMs: 1500 };
@@ -186,5 +188,123 @@ describe('특성: 경계값 비교', () => {
     expect(ev[0]).toMatchObject({ startT: 1100, turnT: 1300, endT: 1700 });
     expect(c.count).toBe(1);
     expect(c.phase).toBe('rest');
+  });
+});
+
+describe('RepEngine + fixedStrategy', () => {
+  const engineOf = (cfg: RepConfig) => new RepEngine(fixedStrategy(cfg), cfg);
+
+  it('완전한 1회: 이벤트 시각과 구간 길이', () => {
+    const e = engineOf(FIXED);
+    const ev = run(e, [[0, 170], [100, 140], [533, 90], [566, 92], [1000, 165], [1033, 170]]);
+    expect(ev).toEqual([{ index: 1, startT: 100, turnT: 533, endT: 1000, outMs: 433, backMs: 467 }]);
+    expect(e.count).toBe(1);
+    expect(e.phase).toBe('rest');
+  });
+
+  it('오래 가림이면 진행 중 반복을 버린다', () => {
+    const e = engineOf(FIXED);
+    run(e, [[0, 170], [100, 140], [300, 90]]);
+    run(e, hold(null, 333, 2400, 100));
+    expect(e.phase).toBe('paused');
+    expect(e.paused).toBe(true);
+    expect(run(e, [[2400, 90], [2700, 130], [3000, 170]])).toHaveLength(0);
+    expect(e.count).toBe(0);
+  });
+
+  it("restSide low + countAt 'turn': 반환점 프레임에서 확정, backMs 0", () => {
+    const cfg: RepConfig = { restSide: 'low', enter: 100, turn: 140, exit: 95, minRepMs: 500, pauseAfterMs: 1500, countAt: 'turn' };
+    const e = engineOf(cfg);
+    const ev = run(e, [[0, 50], [100, 110], [900, 145], [1000, 150]]);
+    expect(ev).toEqual([{ index: 1, startT: 100, turnT: 900, endT: 900, outMs: 800, backMs: 0 }]);
+    // 재무장(exit 너머) 전에는 바닥에서 흔들려도 다시 세지 않는다
+    run(e, [[1100, 120], [1400, 150]]);
+    expect(e.count).toBe(1);
+  });
+
+  it('reset은 count와 상태를 처음으로', () => {
+    const e = engineOf(FIXED);
+    run(e, [[0, 170], [100, 140], [300, 90], [700, 170]]);
+    expect(e.count).toBe(1);
+    e.reset();
+    expect(e.count).toBe(0);
+    expect(e.phase).toBe('rest');
+  });
+});
+
+describe('RepEngine + adaptiveStrategy', () => {
+  it('보정 → 1회, 전략이 기준값과 출처를 알려 준다', () => {
+    const judge = adaptiveStrategy(ADAPTIVE);
+    const e = new RepEngine(judge, ADAPTIVE);
+    expect(e.phase).toBe('calibrating');
+    expect(judge.calibrated).toBe(false);
+    run(e, hold(168, 0, 1000));
+    expect(judge.baseline).toBe(168);
+    expect(judge.calibrationSource).toBe('measured');
+    expect(e.phase).toBe('rest');
+    const ev = run(e, [[1100, 150], [1300, 120], [1700, 150]]);
+    expect(ev).toEqual([{ index: 1, startT: 1100, turnT: 1300, endT: 1700, outMs: 200, backMs: 400 }]);
+  });
+
+  it('ready가 true가 아닌 프레임은 보정에 쓰지 않는다', () => {
+    const judge = adaptiveStrategy(ADAPTIVE);
+    const e = new RepEngine(judge, ADAPTIVE);
+    for (let t = 0; t < 2000; t += DT) e.update(t, 168, false);
+    expect(judge.calibrated).toBe(false);
+    for (let t = 2000; t < 3000; t += DT) e.update(t, 168, true);
+    expect(judge.calibrated).toBe(true);
+  });
+
+  it('reset은 전략의 보정도 처음으로', () => {
+    const judge = adaptiveStrategy(ADAPTIVE);
+    const e = new RepEngine(judge, ADAPTIVE);
+    run(e, hold(168, 0, 1000));
+    e.reset();
+    expect(e.phase).toBe('calibrating');
+    expect(judge.baseline).toBeNull();
+    expect(judge.calibrationSource).toBeNull();
+  });
+});
+
+describe('RepEngine: 껍데기는 전략이 정한 선만으로 판정한다', () => {
+  /** 선이 고정이고 N프레임 뒤에 준비되는 가짜 전략. 시작 50, 반환점 20, 복귀·미달 70, 재무장 80 */
+  function fake(readyAfter: number): JudgeStrategy & { calls: number } {
+    return {
+      calls: 0,
+      inclusive: false,
+      armOnEntry: true,
+      ready() { return this.calls >= readyAfter; },
+      calibrate() { this.calls += 1; },
+      startLine: () => 50,
+      turnLine: () => 20,
+      completeLine: () => 70,
+      abortLine: () => 70,
+      rearmLine: () => 80,
+      reset() { this.calls = 0; },
+    };
+  }
+
+  it('준비 전에는 calibrating, 준비되면 rest로 가서 센다', () => {
+    const e = new RepEngine(fake(3), { restSide: 'high', minRepMs: 0, pauseAfterMs: 1000 });
+    expect(e.phase).toBe('calibrating');
+    run(e, [[0, 90], [10, 90]]);
+    expect(e.phase).toBe('calibrating');
+    run(e, [[20, 90]]);
+    expect(e.phase).toBe('rest');
+    const ev = run(e, [[30, 90], [40, 40], [50, 10], [60, 75]]);
+    expect(ev).toEqual([{ index: 1, startT: 40, turnT: 50, endT: 60, outMs: 10, backMs: 10 }]);
+  });
+
+  it('restSide low면 신호 부호를 뒤집어 같은 선과 비교한다', () => {
+    const e = new RepEngine(fake(0), { restSide: 'low', minRepMs: 0, pauseAfterMs: 1000 });
+    const ev = run(e, [[0, -90], [10, -40], [20, -10], [30, -75]]);
+    expect(ev).toHaveLength(1);
+  });
+
+  it('최소 시간 미달이면 이벤트 없이 rest로', () => {
+    const e = new RepEngine(fake(0), { restSide: 'high', minRepMs: 500, pauseAfterMs: 1000 });
+    expect(run(e, [[0, 90], [10, 40], [20, 10], [30, 75]])).toHaveLength(0);
+    expect(e.phase).toBe('rest');
+    expect(e.count).toBe(0);
   });
 });
