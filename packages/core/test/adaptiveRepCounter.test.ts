@@ -100,6 +100,7 @@ describe('AdaptiveRepCounter: 준비 자세 기준 + 상대 판정', () => {
     expect(calibratingUntil).toBeLessThan(3000);
     expect(c.calibrated).toBe(true);
     expect(c.baseline).toBe(165);
+    expect(c.calibrationSource).toBe('observed');
     // 3초 시점에 바닥이던 3번째 반복은 세지 않고, 4~6번째만 센다.
     expect(c.count).toBe(3);
   });
@@ -278,10 +279,11 @@ describe('수정 1회차: 재무장선·보정 타임아웃 기준점·준비 �
       if (t < back + 3000) expect(c.calibrated, `t=${t - back}ms`).toBe(false);
     }
     expect(c.phase).toBe('calibrating');
-    // 다시 보인 뒤 3초가 지나면 기본값
+    // 다시 보인 뒤 3초가 지나면 타임아웃 확정(관측 최고점 168, 작업 3에서 기본값 165 대신 바뀜)
     run(c, moving(new Seq(s2.t), 600).frames);
     expect(c.calibrated).toBe(true);
-    expect(c.baseline).toBe(165);
+    expect(c.baseline).toBe(168);
+    expect(c.calibrationSource).toBe('observed');
   });
 
   it('준비 자세 확인: ready false인 프레임은 보정에 쓰지 않고, 타임아웃도 흐르지 않는다', () => {
@@ -333,5 +335,76 @@ describe('수정 1회차: 재무장선·보정 타임아웃 기준점·준비 �
     expect(c.phase).toBe('calibrating');
     for (let t = 66; t < 3000; t += DT) c.update(t, null);
     expect(c.phase).toBe('calibrating');
+  });
+});
+
+describe('보정 출처(calibrationSource)와 타임아웃 관측 최고점', () => {
+  /** 계속 움직여 보정 못 하는 신호: lo~hi를 오감. 최고점은 hi */
+  const moving = (hi: number, lo: number, ms: number, t0 = 0): Seq => {
+    const s = new Seq(t0);
+    const end = t0 + ms;
+    while (s.t < end) s.ramp(hi, lo, 300).ramp(lo, hi, 300);
+    return s;
+  };
+
+  it('보정 전에는 null', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    expect(c.calibrationSource).toBeNull();
+    c.update(0, 168);
+    expect(c.calibrationSource).toBeNull();
+  });
+
+  it('정상 보정이면 measured', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    run(c, new Seq().hold(168, 1000).frames);
+    expect(c.calibrationSource).toBe('measured');
+  });
+
+  it('계속 움직이다 타임아웃: 관측 최고값(158)이 기준, observed', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    run(c, moving(158, 110, 3300).frames);
+    expect(c.calibrated).toBe(true);
+    expect(c.baseline).toBe(158);
+    expect(c.calibrationSource).toBe('observed');
+  });
+
+  it('유효 신호가 하나도 없으면 타임아웃 자체가 안 나서 보정되지 않는다(default는 관측값이 없을 때의 방어 경로)', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    run(c, new Seq().hold(null, 4000).frames);
+    expect(c.calibrated).toBe(false);
+    expect(c.calibrationSource).toBeNull();
+  });
+
+  it('유효 신호 한 번뿐인 채 3초 뒤 한 프레임 → 관측값이 있으니 observed(단일값)', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    c.update(0, 150);
+    c.update(3000, 150);
+    expect(c.baseline).toBe(150);
+    expect(c.calibrationSource).toBe('observed');
+  });
+
+  it('restSide low: 관측 최솟값을 기준으로 쓴다(부호 반전)', () => {
+    const c = new AdaptiveRepCounter({ ...CFG, restSide: 'low', defaultBaseline: 40, minBaseline: 60 });
+    // 40~100을 오감. low 쪽 최고점은 최솟값 52
+    const s = new Seq();
+    while (s.t < 3300) s.ramp(52, 100, 300).ramp(100, 52, 300);
+    run(c, s.frames);
+    expect(c.baseline).toBe(52);
+    expect(c.calibrationSource).toBe('observed');
+  });
+
+  it('가림으로 구간이 비워지면 그 앞의 관측값은 버린다', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    run(c, new Seq().hold(175, 200).hold(null, 100).frames);
+    const t0 = 300;
+    run(c, moving(150, 110, 3300, t0).frames);
+    expect(c.baseline).toBe(150);
+  });
+
+  it('reset하면 출처도 null', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    run(c, new Seq().hold(168, 1000).frames);
+    c.reset();
+    expect(c.calibrationSource).toBeNull();
   });
 });

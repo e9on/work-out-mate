@@ -23,6 +23,9 @@ export type AdaptiveConfig = {
   pauseAfterMs: number;
 };
 
+/** 준비 자세 기준값을 어떻게 얻었는지: 안정 구간 측정 / 타임아웃 때 관측 최고점 / 기본값 */
+export type CalibrationSource = 'measured' | 'observed' | 'default';
+
 export type AdaptivePhase = 'calibrating' | 'rest' | 'out' | 'turned' | 'paused';
 
 type Inner = 'calibrating' | 'rest' | 'out' | 'turned';
@@ -53,6 +56,9 @@ export class AdaptiveRepCounter {
   private win: Array<[number, number]> = [];
   /** 보정 구간이 마지막으로 비워진 뒤 처음 들어온 유효(준비 자세) 신호 시각. 타임아웃 기준점 */
   private calibrateFromT: number | null = null;
+  /** 보정 구간이 마지막으로 비워진 뒤 받은 유효 신호의 rest 쪽 최고값(내부 부호). 타임아웃 때 기준으로 쓴다 */
+  private obsBest: number | null = null;
+  private source: CalibrationSource | null = null;
   /** 재무장선을 지나야 true. false면 rest에서 out으로 넘어가지 않는다 */
   private armed = false;
 
@@ -82,6 +88,11 @@ export class AdaptiveRepCounter {
     return this.base === null ? null : this.sign * this.base;
   }
 
+  /** 기준값의 출처. 보정 전이면 null */
+  get calibrationSource(): CalibrationSource | null {
+    return this.source;
+  }
+
   get calibrated(): boolean {
     return this.base !== null;
   }
@@ -97,6 +108,8 @@ export class AdaptiveRepCounter {
     this.pausedSince = null;
     this.win = [];
     this.calibrateFromT = null;
+    this.obsBest = null;
+    this.source = null;
     this.armed = false;
   }
 
@@ -168,6 +181,7 @@ export class AdaptiveRepCounter {
   private calibrate(t: number, s: number): void {
     const { calibrateMs, calibrateTol, calibrateTimeoutMs, defaultBaseline, minBaseline } = this.cfg;
     if (this.calibrateFromT === null) this.calibrateFromT = t;
+    this.obsBest = this.obsBest === null ? s : Math.max(this.obsBest, s);
     this.win.push([t, s]);
     // calibrateMs를 덮는 최소 구간만 남긴다(두 번째 표본부터도 calibrateMs 이상이면 맨 앞은 버림).
     while (this.win.length > 1 && t - this.win[1]![0] >= calibrateMs) this.win.shift();
@@ -181,19 +195,23 @@ export class AdaptiveRepCounter {
       }
       const mean = sum / this.win.length;
       if (max - min <= calibrateTol && mean >= this.sign * minBaseline) {
-        this.finishCalibration(mean, s);
+        this.finishCalibration(mean, s, 'measured');
         return;
       }
     }
     if (t - this.calibrateFromT >= calibrateTimeoutMs) {
-      this.finishCalibration(this.sign * defaultBaseline, s);
+      // 계속 움직여 못 잡았으면 본 것 중 rest 쪽 최고점을 쓴다(기본값보다 실제 자세에 가깝다).
+      if (this.obsBest !== null) this.finishCalibration(this.obsBest, s, 'observed');
+      else this.finishCalibration(this.sign * defaultBaseline, s, 'default');
     }
   }
 
-  private finishCalibration(base: number, s: number): void {
+  private finishCalibration(base: number, s: number, source: CalibrationSource): void {
     this.base = base;
+    this.source = source;
     this.win = [];
     this.calibrateFromT = null;
+    this.obsBest = null;
     this.toRest(s);
   }
 
@@ -201,6 +219,7 @@ export class AdaptiveRepCounter {
   private clearCalibration(): void {
     this.win = [];
     this.calibrateFromT = null;
+    this.obsBest = null;
   }
 
   /** rest로 돌아가며 peak를 지금 값에서 다시 시작하고, 재무장선을 다시 지나야 하게 한다. */
