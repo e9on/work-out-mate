@@ -561,3 +561,45 @@ describe('RoutineRunner: 일시정지 중 건너뛰기', () => {
     expect(sessionOf(d.log).completed).toBe(false);
   });
 });
+
+describe('RoutineRunner.paused', () => {
+  it('세트 중 pause → true → resume → false', () => {
+    const d = runner([sq(2, 2, 30)]);
+    d.frames('squat', hold(175, 500));
+    expect(d.rr.paused).toBe(false);
+    d.rr.pause(d.t);
+    expect(d.rr.paused).toBe(true);
+    d.rr.resume(d.t + 1000);
+    expect(d.rr.paused).toBe(false);
+  });
+
+  it('쉬는 시간 중 pause → true, skipRest로 풀리면 false', () => {
+    const d = runner([sq(2, 2, 30)]);
+    d.doSet('squat', 2);
+    expect(d.rr.phase).toBe('rest');
+    d.rr.pause(d.t);
+    expect(d.rr.paused).toBe(true);
+    d.rr.skipRest(d.t + 1000);
+    expect(d.rr.phase).toBe('set');
+    expect(d.rr.paused).toBe(false);
+  });
+
+  it('skipExercise로 일시정지가 풀리면 false', () => {
+    const d = runner([sq(2, 2, 30), pu(1, 2, 30)]);
+    d.frames('squat', hold(175, 500));
+    d.rr.pause(d.t);
+    d.t += 1000;
+    d.skip();
+    expect(d.rr.paused).toBe(false);
+  });
+
+  it('일시정지 중 stop으로 routineEnd가 나면 false', () => {
+    const d = runner([sq(2, 2, 30)]);
+    d.frames('squat', hold(175, 500));
+    d.rr.pause(d.t);
+    d.t += 1000;
+    d.stop();
+    expect(d.rr.phase).toBe('done');
+    expect(d.rr.paused).toBe(false);
+  });
+});

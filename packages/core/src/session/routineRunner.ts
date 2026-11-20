@@ -94,6 +94,13 @@ export class RoutineRunner {
     return { ...this.pos };
   }
 
+  /** 일시정지 중인지. 세트 중이면 SetRunner.paused, 쉬는 시간이면 쉬는 시간 일시정지 여부, 끝난 뒤에는 false */
+  get paused(): boolean {
+    if (this.ph === 'done') return false;
+    if (this.ph === 'set') return this.runner.paused;
+    return this.pausedAt !== null;
+  }
+
   push(f: PoseFrame): RoutineEvent[] {
     if (this.ph === 'done') return [];
     const out = this.takePending();
