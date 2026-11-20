@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Work Out Mate 스파이크</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+    #app { max-width: 900px; margin: 0 auto; padding: 8px; }
+    #stage { position: relative; width: 100%; background: #000; aspect-ratio: 4 / 3; }
+    #stage video, #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; align-items: center; }
+    select, button { font-size: 16px; padding: 6px 10px; }
+    button.rec { background: #b3261e; color: #fff; border: 0; }
+    #hud { font-family: ui-monospace, monospace; font-size: 15px; line-height: 1.5; white-space: pre-wrap; background: #1c1c1c; padding: 8px; }
+    #big { font-size: 36px; font-weight: bold; margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div class="controls">
+      <label>운동 <select id="exercise"></select></label>
+      <label>모델 <select id="model"><option value="lite">lite</option><option value="full">full</option></select></label>
+      <label>처리 장치 <select id="delegate"><option value="GPU">GPU</option><option value="CPU">CPU</option></select></label>
+      <button id="start">카메라 시작</button>
+      <button id="rec" class="rec" disabled>녹화 시작</button>
+      <button id="tts">음성 테스트</button>
+    </div>
+    <div id="big"></div>
+    <div id="hud"></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

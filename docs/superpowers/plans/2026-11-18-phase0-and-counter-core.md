@@ -4,9 +4,9 @@
 
 **Goal:** 설계 문서의 Phase 0(실기기 검증)과 Phase 1(플랫폼 무관 카운터 코어)을 만든다. 끝나면 갤럭시 S23·PC에서 자세 인식이 쓸 만한지 판단할 수 있고, 6가지 운동(스쿼트·푸시업·덤벨 벤치프레스·턱걸이·네거티브·매달리기)을 녹화된 랜드마크로 세고 검증할 수 있다.
 
-**Architecture:** npm workspaces 모노레포. `packages/core`는 DOM·Capacitor·Tauri를 모르는 순수 TypeScript이고 Vitest로 테스트한다. `apps/spike`는 버리는 검증 앱(Vite + 순수 TS)이며 Capacitor(Android)와 Tauri(PC)로 감싼다. 스파이크 앱의 랜드마크 녹화 기능으로 만든 JSON이 코어 임계값 조정과 합격 테스트의 입력이 된다.
+**Architecture:** npm workspaces 모노레포. `packages/core`는 DOM·Capacitor·Electron을 모르는 순수 TypeScript이고 Vitest로 테스트한다. `apps/spike`는 버리는 검증 앱(Vite + 순수 TS)이며 Capacitor(Android)와 Electron(PC)으로 감싼다. 스파이크 앱의 랜드마크 녹화 기능으로 만든 JSON이 코어 임계값 조정과 합격 테스트의 입력이 된다.
 
-**Tech Stack:** TypeScript 5, Vite, Vitest, `@mediapipe/tasks-vision` 1.2.x, Capacitor 8.x, `@capacitor-community/text-to-speech`, Tauri 2.12+
+**Tech Stack:** TypeScript 7, Vite, Vitest, `@mediapipe/tasks-vision` 1.2.x, Capacitor 8.x, `@capacitor-community/text-to-speech`, Electron 45
 
 **Spec:** `docs/specs/2026-11-18-work-out-mate-mvp-design.md`
 
@@ -15,7 +15,7 @@
 ## Global Constraints
 
 - 서버·클라우드 없음. 실행 중 네트워크 요청 0건 (MediaPipe wasm·모델은 앱 안에 번들)
-- `packages/core`는 `window`, `document`, `@capacitor/*`, `@tauri-apps/*`를 import하지 않는다
+- `packages/core`는 `window`, `document`, `@capacitor/*`, `electron`을 import하지 않는다
 - 기준 기기: Android 갤럭시 S23, PC는 개발 PC 웹캠
 - 합격 기준: 10회 세트마다 손으로 센 횟수와 **±1회 이내**, 매달리기는 **±1초 이내**, 네거티브는 횟수만 판정
 - 덤벨 벤치프레스는 양팔 동시
@@ -42,7 +42,7 @@
 work-out-mate/
   package.json                 # npm workspaces: packages/*, apps/*
   tsconfig.base.json
-  .gitignore                   # node_modules, dist, **/fixtures/private/, src-tauri/target, android/build
+  .gitignore                   # node_modules, dist, **/fixtures/private/, out/, electron-dist/, android/build
   packages/core/
     package.json  tsconfig.json  vitest.config.ts
     src/
@@ -64,7 +64,7 @@ work-out-mate/
     src/main.ts  src/pose.ts  src/recorder.ts  src/speech.ts  src/hud.ts
     public/mediapipe/          # wasm + pose_landmarker_{lite,full}.task (번들)
     capacitor.config.ts  android/   (cap add android 산출물)
-    src-tauri/                 (tauri init 산출물)
+    electron/                  (main.ts, preload.ts — Electron 메인 프로세스)
   docs/phase0-results.md       # Phase 0 측정 결과 기록
 ```
 
@@ -152,8 +152,9 @@ type RepConfig = {
   enter: number;             // 이 값을 넘어가면(restSide 반대 방향) '동작 중'
   turn: number;              // 이 값까지 가야 '반환점 도달'
   exit: number;              // 다시 이 값을 넘어 돌아오면 1회 확정 (enter와 히스테리시스)
-  minPhaseMs: number;        // 나감·돌아옴 각 구간 최소 시간
+  minRepMs: number;          // 반복 전체(startT→endT) 최소 시간. 구간별 최소 시간은 두지 않음
   pauseAfterMs: number;      // 신호 null이 이만큼 이어지면 진행 중 반복을 버림
+  countAt?: 'return' | 'turn'; // 기본 'return'(돌아올 때 확정). 'turn'이면 turn 도달 프레임에 확정(endT=turnT, backMs=0), 이후 exit를 넘어야 재무장
 };
 type RepPhase = 'rest' | 'out' | 'turned' | 'paused';
 type RepEvent = { index: number; startT: number; turnT: number; endT: number; outMs: number; backMs: number };
@@ -167,11 +168,11 @@ class RepCounter {
 ```
 
 상태 전이 (restSide 'high' 기준, 'low'는 부등호 반대):
-`rest --(signal < enter)--> out --(signal <= turn)--> turned --(signal > exit, 두 구간 모두 ≥ minPhaseMs)--> rest (+1, RepEvent)`
+`rest --(signal < enter)--> out --(signal <= turn)--> turned --(signal > exit, endT−startT ≥ minRepMs)--> rest (+1, RepEvent)`
 `out --(signal > exit, turn 미도달)--> rest (세지 않음)`
 signal null → 직전 phase 기억, `paused`. `pauseAfterMs` 넘게 이어지면 진행 중 반복을 버리고 `rest`로 복귀. 그 전에 신호가 돌아오면 기억한 phase로 계속.
 
-- [ ] **Step 1: 실패하는 테스트** (cfg: restSide 'high', enter 150, turn 95, exit 160, minPhaseMs 250, pauseAfterMs 1500; 신호 배열은 33ms 간격)
+- [ ] **Step 1: 실패하는 테스트** (cfg: restSide 'high', enter 150, turn 95, exit 160, minRepMs 500, pauseAfterMs 1500; 신호 배열은 33ms 간격)
   - `완전한 1회`: 170→…→90→…→170 (각 구간 400ms 이상) → count 1, 이벤트 1개, `outMs`≈나감 구간 시간
   - `3회 연속` → 3
   - `가만히 서 있음`: 170 근처 ±3 노이즈 300프레임 → 0 *(Review Focus 2)*
@@ -244,14 +245,14 @@ function replay(id: ExerciseId, frames: PoseFrame[]): TrackerState & { reps: Rep
 신호 정의 (좌우 중 관련 관절 평균 visibility가 높은 쪽 사용, 둘 다 0.5 미만이면 `null`, 각도는 `world` 좌표, EMA alpha 0.5):
 | id | 신호 | restSide | 초기 임계값 enter/turn/exit | 비고 |
 |---|---|---|---|---|
-| squat | 무릎 각도 (엉덩이-무릎-발목) | high | 150/100/160 | |
-| pushup | 팔꿈치 각도 | high | 150/100/160 | |
-| dumbbellBench | 양팔 팔꿈치 각도의 **평균** (양팔 동시) | high | 150/100/160 | 양팔 다 보여야 함, 한쪽만 보이면 null |
-| pullup | 팔꿈치 각도만 사용 (턱·철봉 위치는 보지 않음 — 사용자 결정) | high | 140/80/155 | |
-| negative | 팔꿈치 각도 | low | 70/150/60 | `RepEvent.outMs` = 내려온 시간 |
+| squat | 무릎 각도 (엉덩이-무릎-발목) | high | 150/100/160 | Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함) |
+| pushup | 팔꿈치 각도 | high | **145/120/150** | 근거: S23 옆 바닥 촬영 5회 실측에서 반복 사이 맨 위가 155~157(exit 160 미달), 바닥이 90~114(turn 100 미달 3회)라 실제 1회만 셌음 / Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함) |
+| dumbbellBench | 양팔 팔꿈치 각도의 **평균** (양팔 동시) | high | 150/100/160 | 양팔 다 보여야 함, 한쪽만 보이면 null. Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함). **위험(I3)**: 양팔이 모두 보여야 신호가 나오므로 측면 촬영에서는 0회가 될 수 있다. 실측 필요 |
+| pullup | **양팔 팔꿈치 각도 평균**(한쪽만 보이면 그쪽, 둘 다 안 보이면 null). 턱·철봉 위치는 보지 않음 — 사용자 결정 | high | 140/80/155 | |
+| negative | **양팔 팔꿈치 각도 평균**(pullup과 동일 규칙) | low | **100/140/95**, `countAt: 'turn'`, **minRepMs 250** | `RepEvent.outMs` = 내려온 시간. 근거: S23 실측 enter→turn이 284~387ms라 minRepMs 500이면 2·3번째가 버려져 250으로 낮춤(교정은 outMs로 따로). 또 위로 올라가는 동작은 점프라 마지막 반복이 안 세졌고, 좌우 한쪽만 쓰면 덜 펴진 팔 때문에 turn에 못 닿았으며, 맨 위 양팔 평균이 53~85°(바닥 145~159°)였다 |
 | deadHang | holding = 두 손목이 코보다 위 && 양 팔꿈치 각도 ≥ 150 | — | startAfterMs 300, graceMs 500 | |
 
-모든 RepConfig: minPhaseMs 250, pauseAfterMs 1500. **임계값은 출발점일 뿐이고 Task 10에서 녹화 데이터로 조정한다.**
+모든 RepConfig: minRepMs 500(전체 반복 최소 시간), pauseAfterMs 1500. (구간별 minPhaseMs 250을 바꾼 이유: 실측에서 150→100° 구간이 0.19~0.23초라 정상 반복이 버려졌고, 실제 반복 전체는 1.26~1.63초였다.) **임계값은 출발점일 뿐이고 Task 10에서 녹화 데이터로 조정한다.**
 
 - [ ] **Step 1: 실패하는 테스트** — `buildPose`/`series`로:
   - 운동마다 "완전한 1회" 각도 열 → `replay(id).count === 1` (deadHang은 `wristAboveNose:true, elbow:170` 5초 → `heldMs` ≈ 5000±100, 시작 시각은 처음 true 프레임이므로 startAfterMs를 빼지 않는다)
@@ -293,20 +294,20 @@ TDD 대상이 아니다. 완료 기준은 아래 수동 확인.
 - [ ] **Step 1: 사용자 허락 받고 자산 준비** — `npm i @mediapipe/tasks-vision@1.2.x` 후 `node_modules/@mediapipe/tasks-vision/wasm/*`를 `public/mediapipe/wasm/`로 복사. 모델 `pose_landmarker_lite.task`, `pose_landmarker_full.task`를 Google 공식 저장소(`storage.googleapis.com/mediapipe-models/pose_landmarker/...`)에서 받는다 — **받기 전에 파일명·출처·크기를 사용자에게 알리고 허락받는다.**
 - [ ] **Step 2: 화면 구성** — 카메라 `<video>`, 랜드마크 오버레이 `<canvas>`, 컨트롤: 운동 선택(6종), 모델(lite/full), delegate(GPU/CPU), 녹화 시작/정지, 음성 테스트 버튼. HUD: FPS(최근 1초 처리 프레임), 추론 ms(평균·p95), 현재 count/heldMs/paused.
 - [ ] **Step 3: 추론 루프** — `FilesetResolver.forVisionTasks('/mediapipe/wasm')`, `modelAssetPath: '/mediapipe/pose_landmarker_<m>.task'`, `runningMode: 'VIDEO'`, `requestVideoFrameCallback`(없으면 rAF)마다 `detectForVideo`. 이전 추론이 안 끝났으면 그 프레임은 건너뛴다. 결과를 `PoseFrame`으로 바꿔 tracker에 push.
-- [ ] **Step 4: 녹화** — 녹화 중 `PoseFrame`을 모아 `RecordingFile`로 저장. 브라우저/Tauri는 다운로드, Android는 Filesystem 플러그인으로 Documents에 저장(Task 9에서 연결).
+- [ ] **Step 4: 녹화** — 녹화 중 `PoseFrame`을 모아 `RecordingFile`로 저장. 브라우저/Electron은 다운로드, Android는 Filesystem 플러그인으로 Documents에 저장(Task 9에서 연결).
 - [ ] **Step 5: 음성** — `speech.ts`의 `speak(text: string): Promise<'ok'|'unsupported'>`: Capacitor 네이티브면 TTS 플러그인(`lang: 'ko-KR'`), 아니면 `speechSynthesis`에서 `ko` 음성 선택. 음성 목록을 HUD에 표시.
 - [ ] **Step 6: 수동 확인 (PC Chrome, `npm run dev -w apps/spike`)** — 웹캠 켜짐, 랜드마크 표시, 스쿼트 3회 → count 3, 녹화 파일을 Task 7 CLI로 재생 → 같은 count. DevTools Network에서 MediaPipe 관련 외부 요청 0건.
 - [ ] **Step 7: 커밋** — `chore(spike): Phase 0 검증용 스파이크 앱`
 
-### Task 9: Tauri(PC)·Capacitor(Android)로 감싸서 측정
+### Task 9: Electron(PC)·Capacitor(Android)로 감싸서 측정
 
-**선행 (사용자가 직접 설치, 각각 허락 후 진행):** Rust(rustup), Microsoft C++ Build Tools(Tauri 요구 시), JDK 21, Android Studio(이미 있는 SDK 폴더 재사용), S23 USB 디버깅 켜기.
+**선행 (사용자가 직접 설치, 각각 허락 후 진행):** JDK 21(Electron은 npm 설치만으로 충분, Rust·C++ 빌드 도구 불필요), Android Studio(이미 있는 SDK 폴더 재사용), S23 USB 디버깅 켜기.
 
 **Files:**
-- Create: `apps/spike/capacitor.config.ts`, `apps/spike/android/`(cap add), `apps/spike/src-tauri/`(tauri init), `docs/phase0-results.md`
+- Create: `apps/spike/capacitor.config.ts`, `apps/spike/android/`(cap add), `apps/spike/electron/`(main.ts, preload.ts), `apps/spike/scripts/electron-*.mjs`, `docs/phase0-results.md`
 
 - [ ] **Step 1: Capacitor 연결** — `@capacitor/core@8 @capacitor/cli@8 @capacitor/android@8 @capacitor-community/text-to-speech @capacitor/filesystem @capacitor-community/keep-awake`, `npx cap add android`, `AndroidManifest.xml`에 `CAMERA` 권한. 빌드 후 S23에 설치.
-- [ ] **Step 2: Tauri 연결** — `npm create tauri-app` 대신 기존 Vite 앱에 `tauri init`(frontendDist `../dist`, devUrl `http://localhost:5173`). `tauri build`로 Windows 실행 파일.
+- [ ] **Step 2: Electron 연결** — `electron`, `@electron/packager`, `esbuild`를 devDependency로 고정. `dist/`를 `app://wom/` 커스텀 프로토콜로 서빙, 외부 요청 전부 차단, 카메라만 허용, 녹화는 문서/WorkOutMate에 저장. `npm run electron:pack -w apps/spike`로 Windows 폴더(`apps/spike/out/`).
 - [ ] **Step 3: 측정 (S23, PC 각각)** — `docs/phase0-results.md`에 표로 기록:
   - lite/full × GPU/CPU별 FPS, 추론 ms 평균·p95 (각 30초)
   - 카메라 권한: 첫 실행 허용 / 거부 후 재실행 동작
@@ -325,14 +326,42 @@ TDD 대상이 아니다. 완료 기준은 아래 수동 확인.
 
 **Interfaces:**
 - Consumes: `replay`, `RecordingFile`
-- Produces: `manifest.json` 형식 `[{ file: string; exercise: ExerciseId; expectedCount?: number; expectedHeldMs?: number; note: string }]`
+- Produces: `manifest.json` 형식 `[{ file: string; exercise: ExerciseId; expectedCount?: number; expectedHeldMs?: number; expectedReplayCount?: number; expectedReplayHeldMs?: number; note: string }]`
 
 - [ ] **Step 1: 녹화 수집 (사용자 촬영)** — 스파이크 앱(S23 기준)으로 운동마다 10회 세트 2개 이상, 매달리기 2개 이상. 촬영하며 손으로 센 횟수·스톱워치 초를 `manifest.json`에 적는다. 일부러 반만 내려간 반복, 화면 밖으로 잠깐 나간 세트도 1개씩 넣는다.
 - [ ] **Step 2: 합격 테스트 작성** — manifest의 각 항목을 `replay` → `|count - expectedCount| <= 1`, `|heldMs - expectedHeldMs| <= 1000`. `manifest.json`이 없으면 `test.skip`.
+  - 기준은 둘이다. (1) 사람이 센 값 기준: `expectedCount ±1`, `expectedHeldMs ±1000`. (2) 회귀 기준: `expectedReplayCount`·`expectedReplayHeldMs`가 있으면 replay 결과가 정확히 같아야 한다(코드를 바꿔 결과가 달라졌는지 잡는 용도이고, 사람이 센 값과 다를 수 있다).
 - [ ] **Step 3: 실행해서 현재 성적 확인** — `npm test -w packages/core -- acceptance`. 실패 항목 기록.
 - [ ] **Step 4: 임계값 조정** — `npm run replay`로 신호 값을 보며 `definitions.ts` 수정. 바꾼 값마다 근거(어떤 녹화에서 무엇이 틀렸는지)를 커밋 메시지에 적는다. Task 6 단위 테스트도 계속 통과해야 한다.
 - [ ] **Step 5: 전부 통과 확인** — `npm test -w packages/core` → 전체 PASS. 통과 못 하는 운동은 `phase0-results.md`에 "보류"와 원인을 적는다.
 - [ ] **Step 6: 커밋** — `feat(core): 실측 기반 임계값 조정`
+
+### Task 6b: 준비 자세 기준(보정) + 상대 판정 카운터
+
+지시서: `.superpowers/sdd/2026-11-18-phase0-and-counter-core/task-6b-adaptive-brief.md` (사용자 결정 2026-11-18: 고정 각도 대신 각자의 준비 자세를 기준으로 센다)
+
+**Files:** Create `packages/core/src/counter/adaptiveRepCounter.ts`, `packages/core/test/adaptiveRepCounter.test.ts` / Modify `definitions.ts`, `runner.ts`(`TrackerState.calibrating`·`baseline`), `index.ts`, `exercises.test.ts`, `test/fixtures/sample-squat-3.json`, `apps/spike/src/main.ts`·`hud.ts`
+
+- 적용: `squat`·`pushup`·`dumbbellBench` → `AdaptiveRepCounter`(정의에 `adaptive: AdaptiveConfig`). `pullup`·`negative`는 `rep: RepConfig` 그대로, `deadHang` 그대로.
+- 보정: 준비 자세(ready true) 프레임만 쌓아, **가장 최근** 700ms 이상 구간에서 표본 10개 이상, 변동 ≤ 8°, 평균 ≥ minBaseline이 되는 순간 그 평균을 기준으로 정한다(세트 시작 직후가 아니어도 됨). null·ready false/null 프레임은 구간을 비운다. 구간이 마지막으로 비워진 뒤 첫 유효 신호부터 3초 안에 못 잡으면 defaultBaseline.
+- 판정: 시작 = 직전 최고점 − startDrop, 바닥 = 기준 − depth, 복귀 = 이번 최저점 + rebound.
+- 수정 1회차(검토 반영, 컨트롤러 결정):
+  - **재무장선 = 기준 − depth/2.** 확정·미달 복귀·보정 직후·오래 가림 뒤에는 신호가 이 선을 한 번 지나야 다음 반복을 시작한다. 근거: 확정 시점(최저 + rebound)이 바닥선과 거의 같아서(실측 pushup 6번째는 바닥선 123 아래 122에서 확정), 확정 직후 10~15°만 흔들려도 2회째로 셀 수 있었다.
+  - **타임아웃 기준점.** 첫 유효 신호가 아니라, 보정 구간이 마지막으로 비워진 뒤의 첫 유효 신호부터 잰다. 근거: 지나가다 잠깐 보인 순간이나 오래 가렸다 다시 보인 순간에 곧바로 기본값으로 확정되는 문제를 막는다.
+  - **준비 자세 확인 `ready(frame)`.** pushup·bench는 몸통(image 어깨 중점 → 엉덩이 중점)이 수평에서 35° 이내, squat은 수직에서 35° 이내다. 어깨나 엉덩이가 하나도 안 보이면 null이다. 보정 중에만 본다. 근거: 푸시업에서 서서 걸어올 때(팔꿈치 약 170°)로 보정되면, 엎드리며 굽혔다 펼 때 가짜 1회가 생긴다.
+  - 보정 중 가림이어도 `calibrating`은 true를 유지한다(`paused`도 true). HUD는 준비 자세 안내를 우선으로 보여 준다.
+
+| 운동 | depth | rebound | startDrop | defaultBaseline | minBaseline |
+|---|---|---|---|---|---|
+| squat | 60 | 35 | 10 | 170 | 150 |
+| pushup | 40 | 30 | 10 | 165 | 140 |
+| dumbbellBench | 40 | 30 | 10 | 165 | 140 |
+
+공통: calibrateMs 700, calibrateTol 8, calibrateTimeoutMs 3000, minRepMs 500, pauseAfterMs 1500. 지시서 초기값 그대로(조정 없음).
+
+- 근거: S23 실측에서 푸시업 준비 자세 166~169°, 반복 사이 맨 위 155~157°, 바닥 90~114°. 맨 위가 준비 자세보다 약 10° 덜 펴지므로 복귀는 준비 자세가 아니라 이번 최저점 기준으로 본다. 카메라 각도로 전체가 밀리는 경우(−15°)도 기준이 같이 밀려 센다.
+- 합격 테스트(실제 녹화 5개): 전부 통과. squat 6/5, negative 3, deadHang 13.8초는 이전과 같고, pushup은 5 → 6(기대 5, ±1 안). 늘어난 1회는 녹화 끝에서 녹화를 끄러 움직이는 구간(0.6초 만에 157→91→122 뒤 가림)이다. 맨 위 157에서 무장된 채 시작한 반복이라 재무장선으로는 막히지 않는다. 수정 1회차 뒤에도 결과는 같다. 보정은 squat 2.05초/171°, 2.54초/156°, pushup 2.87초/163°로 모두 준비 자세 확인을 통과해 잡혔다(타임아웃 없음).
+- 합성 테스트는 준비 자세(1초 정지)를 앞에 붙여야 센다. 기존 `exercises.test.ts`의 squat·pushup·bench 시나리오와 CLI 샘플 `sample-squat-3.json`(합성)에 1초 준비 자세를 붙였다.
 
 ---
 

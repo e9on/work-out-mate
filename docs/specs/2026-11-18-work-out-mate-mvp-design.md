@@ -1,7 +1,8 @@
 # Work Out Mate — MVP 설계 보고서
 
 - 작성일: 2026-11-18
-- 상태: 초안 (승인 전. 승인 전에는 코드·프로젝트 파일을 만들지 않는다)
+- 상태: 승인됨(2026-11-18), Phase 0 진행
+- 변경(2026-11-18): PC 앱 포장을 Tauri에서 Electron으로 바꿨다. 사유: Tauri는 Rust와 MSVC C++ 빌드 도구(수 GB) 설치가 필요하고, WebView2 카메라 권한 동작이 불확실했다. 이 PC의 Chromium(Chrome)에서 카메라와 한국어 음성(Microsoft Heami)이 이미 동작하는 것을 확인했다.
 - 근거: `초기 기획.docx`(2026-11-11), 초기 개발 지침, 2026-11-18 대화, 같은 날 웹 조사
 
 표기: **[확정]** 사용자가 정한 것 / **[제안]** 설계자가 정한 것(바꿀 수 있음) / **[확인 필요]** 아직 검증하지 않은 것
@@ -50,7 +51,7 @@
 
 ## 2. 제약
 - 서버·클라우드 없음. 추론·저장 모두 기기 안 [확정]
-- PC(Windows)와 Android는 독립 실행, **데이터** 저장소도 따로(기기 간 동기화 없음) [확정]. 코드는 git 저장소 하나(모노레포: 공통 웹앱 + `src-tauri` + Capacitor `android`)로 관리한다 [제안]
+- PC(Windows)와 Android는 독립 실행, **데이터** 저장소도 따로(기기 간 동기화 없음) [확정]. 코드는 git 저장소 하나(모노레포: 공통 웹앱 + Electron `electron/` + Capacitor `android`)로 관리한다 [제안]
 - 개발 PC는 Windows. Mac 없음 → iOS 빌드 불가 (iOS 단계에서 Mac 또는 클라우드 macOS 빌드 필요)
 - 근거 없이 라이브러리·모델을 확정하지 않고, 검증하지 않은 성능 수치를 쓰지 않는다 (지침 8)
 
@@ -58,7 +59,7 @@
 
 | 안 | 내용 | 장점 | 단점 |
 |---|---|---|---|
-| **A. 웹 코드 + 앱 포장 [확정]** | TypeScript 웹앱 하나를 Capacitor로 감싸 Android, Tauri로 감싸 PC. iOS는 나중에 Capacitor로 | 화면·로직을 한 번만 만든다. iOS 추가 비용이 가장 작다. 느리면 자세 인식만 네이티브 플러그인으로 교체 가능 | WebView 안에서 자세 인식 속도 미검증. 음성·카메라 권한이 플랫폼마다 다르게 동작 |
+| **A. 웹 코드 + 앱 포장 [확정]** | TypeScript 웹앱 하나를 Capacitor로 감싸 Android, Electron으로 감싸 PC. iOS는 나중에 Capacitor로 | 화면·로직을 한 번만 만든다. iOS 추가 비용이 가장 작다. 느리면 자세 인식만 네이티브 플러그인으로 교체 가능 | WebView 안에서 자세 인식 속도 미검증. 음성·카메라 권한이 플랫폼마다 다르게 동작 |
 | B. Flutter | Dart로 화면, 플랫폼 채널로 MediaPipe 네이티브 SDK 연결 | 모바일 성능이 유리할 수 있음 | Windows용 공식 MediaPipe Tasks SDK가 없어 PC를 따로 연결해야 함. iOS 때 연결 코드 재작성 |
 | C. 플랫폼별 네이티브 | PC Python, Android Kotlin, iOS Swift | 성능 최고 | 화면·로직을 세 번 만들고 카운팅 결과를 계속 맞춰야 함 |
 | (제외) PWA만 | 브라우저에서 바로 실행 | 설치 불필요 | 사용자가 Android·iPhone은 앱으로 만들기로 결정 |
@@ -83,10 +84,10 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 └───────────────────────────────────────────────────────────────────────────┘
         │ 구현(adapters)                          │
  ┌──────┴───────────────┐               ┌─────────┴─────────────────┐
- │ Android (Capacitor 8) │               │ PC (Tauri 2, WebView2)    │
+ │ Android (Capacitor 8) │               │ PC (Electron 45, Chromium)│
  │ PoseSource: MediaPipe │               │ PoseSource: MediaPipe 웹  │
  │   웹(WebView) → 느리면│               │ Speech: speechSynthesis   │
- │   네이티브 SDK 플러그인│              │ Storage: SQLite 플러그인  │
+ │   네이티브 SDK 플러그인│              │ Storage: main SQLite      │
  │ Speech: TTS 플러그인  │               │                           │
  │ Storage: SQLite 플러그인│             │                           │
  │ KeepAwake: 플러그인   │               │                           │
@@ -95,9 +96,9 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 ```
 
 설계 원칙
-- `core`는 DOM·Capacitor·Tauri를 import하지 않는다. 입력은 "시각 + 33개 랜드마크(+visibility)"뿐이다. 그래서 녹화한 랜드마크 파일로 PC에서 테스트를 돌릴 수 있다.
+- `core`는 DOM·Capacitor·Electron을 import하지 않는다. 입력은 "시각 + 33개 랜드마크(+visibility)"뿐이다. 그래서 녹화한 랜드마크 파일로 PC에서 테스트를 돌릴 수 있다.
 - `PoseSource`는 "프레임 → `{timestampMs, landmarks[33], worldLandmarks[33]}`" 형식만 내보낸다. 웹 MediaPipe든 네이티브 플러그인이든 같은 형식이다.
-- 저장소는 `Storage` 포트 뒤에 둔다. [제안] 양쪽 모두 SQLite 플러그인을 쓴다. 이유: 기록이 쌓이는 구조이고, IndexedDB보다 앱 삭제 전까지 보관이 확실하다.
+- 저장소는 `Storage` 포트 뒤에 둔다. [제안] Android는 Capacitor SQLite 플러그인, PC(Electron)는 main 프로세스 SQLite를 쓴다. 이유: 기록이 쌓이는 구조이고, IndexedDB보다 앱 삭제 전까지 보관이 확실하다.
 - 웹앱 파일(MediaPipe wasm·모델 포함)은 앱 안에 번들한다. 실행 중 네트워크를 쓰지 않는다.
 
 ## 5. 기술 스택과 선정 이유
@@ -105,21 +106,21 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 | 영역 | 선택 | 이유 / 근거 | 상태 |
 |---|---|---|---|
 | 언어 | TypeScript | 세 플랫폼 공통 코드 | [확정] |
-| 빌드 | Vite | Capacitor·Tauri 둘 다 정적 웹 산출물을 감싼다 | [제안] |
+| 빌드 | Vite | Capacitor·Electron 둘 다 정적 웹 산출물을 감싼다 | [제안] |
 | UI 프레임워크 | React | 자료·플러그인 예제가 가장 많음. 빌더가 바꿔도 됨 | [제안] |
 | 자세 인식 | `@mediapipe/tasks-vision` PoseLandmarker 1.2.x | 공식 웹판 존재. 33 랜드마크 + world 좌표 + visibility/presence 제공 | [확정 방향] / 속도 [확인 필요] |
 | 모델 | pose_landmarker **lite** 부터 | 속도 우선. full/heavy와 Phase 0에서 비교 | [제안] |
 | Android 포장 | Capacitor 8.x | getUserMedia 카메라 권한을 Capacitor가 처리(`BridgeWebChromeClient`) | 문서 확인됨, 실기기 [확인 필요] |
-| PC 포장 | Tauri 2.12+ | 2.12에 권한 요청 훅 추가. WebView2 카메라 권한 동작은 실기기 확인 필요 | [확인 필요] |
+| PC 포장 | Electron 45 (`@electron/packager`) | Chromium을 같이 담아 카메라·`speechSynthesis`가 Chrome과 같게 동작. `app://` 프로토콜로 dist를 서빙, 외부 요청 전부 차단. 폴더 약 400MB | 자동 점검 통과, 실카메라는 [확인 필요] |
 | 음성 (Android) | `@capacitor-community/text-to-speech` | Android WebView는 Web Speech API 미지원(MDN) | 확인됨 |
-| 음성 (PC) | `speechSynthesis` (WebView2) | 한국어 음성이 오프라인에서 잡히는지 미확인 → 안 되면 Tauri 쪽 Windows TTS 호출로 대체 | [확인 필요] |
-| 저장 | Capacitor/Tauri SQLite 플러그인 | 위 4절 | [제안] |
+| 음성 (PC) | `speechSynthesis` (Electron의 Chromium) | Windows 한국어 음성 Microsoft Heami가 목록에 잡히는 것을 확인(자동 점검). 실제 발음은 사용자 확인 | 확인됨(목록), 발음 [확인 필요] |
+| 저장 | Capacitor SQLite 플러그인 / Electron은 main 프로세스 SQLite(구현은 해당 단계에서 결정) | 위 4절 | [제안] |
 | 화면 꺼짐 방지 | `@capacitor-community/keep-awake` | 운동 중 화면 꺼짐 방지 | 확인됨 |
 | 테스트 | Vitest (core 단위 테스트, 녹화 랜드마크 재생 테스트) | | [제안] |
 | (나중) ML 학습 | Python + PyTorch, `torch.onnx.export`(dynamo 기본) | 지침 | 이후 단계 |
 | (나중) ML 추론 | ONNX Runtime Web (wasm, 되면 WebGPU) | 공통 코드 유지. Android 네이티브(ORT Mobile / LiteRT)는 웹이 부족할 때 비교 | 이후 단계 |
 
-정확한 버전은 Phase 0에서 고정하고 lockfile로 관리한다. 참고로 조사 시점(2026-11-18) 최신 버전은 tasks-vision 1.2.3, Capacitor 8.6.2(9.0 RC 존재), Tauri 2.12.x였다.
+정확한 버전은 Phase 0에서 고정하고 lockfile로 관리한다. 참고로 조사 시점(2026-11-18) 최신 버전은 tasks-vision 1.2.3, Capacitor 8.6.2(9.0 RC 존재)였다. PC 포장은 Electron 45.2.2로 고정했다.
 
 알아 둘 점
 - 웹판 PoseLandmarker는 VIDEO 모드(동기 `detectForVideo`)만 있고 LIVE_STREAM이 없다. 그래서 프레임 루프에서 추론이 밀리면 이전 프레임을 건너뛰는 처리를 직접 해야 한다. [제안] 추론을 Web Worker로 옮길 수 있는지 Phase 0에서 확인한다.
@@ -147,6 +148,8 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 | 턱걸이 | 횟수 | 팔꿈치 각도만으로 판별 [확정: 턱이 철봉을 넘었는지는 보지 않음] | — | 정면 또는 뒤, 철봉까지 화면에 들어오게 | 중간~높음 (세로로 긴 화면 구성) |
 | 네거티브 | 횟수 + 내려온 초 | 팔꿈치 각도가 "굽힘 → 펴짐"으로 가는 구간 | 올라갈 때는 세지 않음(점프·발판으로 올라감), 내려오는 시간 측정 | 턱걸이와 같음 | 중간~높음 |
 | 매달리기 | 버틴 초 | 손목이 머리 위, 팔꿈치 펴짐 상태 유지 | 상태가 깨지면(손 놓음) 타이머 멈춤 | 턱걸이와 같음 | 중간 (매달린 것과 그냥 팔 든 것 구분) |
+
+**준비 자세 보정** [확정: 2026-11-18 사용자 결정] 스쿼트·푸시업·덤벨 벤치프레스는 고정 각도 대신 각자의 준비 자세를 기준으로 센다. 세트를 시작하면 먼저 준비 자세로 잠시(0.7초) 멈춰 서고, 그때 각도 평균을 기준으로 삼는다(그동안 화면에 "준비 자세를 잡아 주세요"). 바닥은 "기준보다 몇 도 더 굽힘", 복귀는 "이번 최저점보다 몇 도 다시 펴짐"으로 상대 판정한다. 실측에서 반복 사이 맨 위가 준비 자세보다 약 10° 덜 펴졌고, 카메라 각도·사람에 따라 각도 전체가 위아래로 밀렸기 때문이다. 3초 안에 준비 자세를 못 잡으면 운동별 기본 기준으로 시작한다. 턱걸이·네거티브는 고정 임계값을 유지한다. 값과 근거는 Phase 0 계획 Task 6b.
 
 세트 종료 조건: 목표(횟수/초) 도달 → 자동 종료 / 사용자가 버튼으로 종료 / [제안] 일정 시간 움직임이 없으면 "세트를 끝낼까요?" 안내. 매달리기는 손을 놓으면 세트가 끝난다.
 
@@ -211,9 +214,9 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 | # | 위험 | 대응 |
 |---|---|---|
 | 1 | WebView 안 MediaPipe 웹판 속도가 저사양 Android에서 부족할 수 있음 (공식 수치 없음, LIVE_STREAM 없음) | Phase 0에서 실기기 측정. 부족하면 PoseSource만 네이티브 Android SDK 플러그인으로 교체(minSdk 28) |
-| 2 | 음성: Android WebView는 Web Speech 미지원, PC는 한국어 오프라인 음성 미확인 | Speech 포트로 분리. Android는 TTS 플러그인, PC는 speechSynthesis → 안 되면 Tauri에서 Windows TTS 호출. 음성 없으면 비프음 + 큰 화면 숫자 |
+| 2 | 음성: Android WebView는 Web Speech 미지원, PC는 한국어 오프라인 음성 미확인 | Speech 포트로 분리. Android는 TTS 플러그인, PC는 speechSynthesis(Electron). 안 되면 main에서 Windows TTS 호출. 음성 없으면 비프음 + 큰 화면 숫자 |
 | 3 | 오프라인 번들: wasm(약 14.7MB) + 모델을 로컬에서 불러오는 공식 예시 없음, 텔레메트리 항목 | Phase 0에서 비행기 모드로 실행 확인, 네트워크 요청 모니터링 |
-| 4 | Windows 카메라 권한: WebView2가 거부 결정을 기억, OS 카메라 스위치 | 권한 거부 시 안내 화면, 설정 여는 방법 안내 |
+| 4 | Windows 카메라 권한: OS 카메라 개인정보 스위치가 꺼져 있으면 Electron도 카메라를 못 연다 (WebView2 방식은 Electron 전환으로 해소) | 권한 거부·장치 없음 시 안내 화면, 설정 여는 방법 안내 |
 | 5 | 운동별 카운팅 오작동 (푸시업·벤치프레스의 누운 자세, 벤치·덤벨 가림, 턱걸이의 세로 화면 구성) | 운동별 카메라 배치 안내 화면, 가시성 게이트, 녹화 랜드마크로 회귀 테스트 |
 | 6 | Python판과 웹판 좌표 차이 | ML 단계 전에 같은 영상으로 비교 검증. 학습용 추출을 웹판 기준으로 맞추는 방안도 검토 |
 | 7 | 공개 데이터 라이선스·접근 | 확인 전에는 학습에 쓰지 않음. 자체 수집을 주 데이터로 계획 |
@@ -225,7 +228,7 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 - 기준 기기 [확정]: Android는 사용자 폰 갤럭시 S23(사용자가 "갤럭시 23"이라고 함, S23으로 해석), PC는 개발 PC 웹캠. S23은 고사양 기기라서 저사양 Android 성능은 MVP에서 검증하지 않는다(이후 단계 위험으로 남김).
 - "WebView로 충분한가"의 판단 기준 [제안]: S23의 WebView에서 각 운동이 위 MVP 완료 기준을 통과하면 WebView를 유지한다. 통과하지 못하고 원인이 속도(프레임 누락)이면 PoseSource만 네이티브로 바꾼다.
 - 누운 자세(푸시업·벤치프레스)에서 랜드마크가 안정적으로 잡히는지 S23으로 확인
-- 갤럭시 S23과 Windows PC 웹캠에서 lite/full 모델 FPS·지연 측정 (Capacitor/Tauri 안에서)
+- 갤럭시 S23과 Windows PC 웹캠에서 lite/full 모델 FPS·지연 측정 (Capacitor/Electron 안에서)
 - 앱 번들 오프라인 로딩, 네트워크 요청 없음 확인
 - 카메라 권한(양쪽), TTS 한국어(양쪽) 확인
 - 결과로 "WebView 그대로 / 네이티브 플러그인" 결정, 버전 고정
@@ -254,11 +257,11 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 - 라벨링 도구 선택(Phase 2 이후)
 
 ## 13. 확인 필요 목록 (요약)
-- MediaPipe 웹판 FPS (갤럭시 S23 WebView, WebView2)
+- MediaPipe 웹판 FPS (갤럭시 S23 WebView, PC Electron)
 - 누운 자세(푸시업·벤치프레스) 랜드마크 안정성
 - 매달리기와 그냥 팔 든 자세 구분
 - tasks-vision 오프라인 로딩 절차, 텔레메트리 여부
-- Tauri/WebView2 카메라 권한 동작
+- Electron 앱의 카메라 권한 동작(실카메라)
 - PC 한국어 TTS 오프라인 음성
 - UI-PRMD 다운로드 경로, KIMORE·InfiniteRep·RepCount 라이선스
 - Python판·웹판 MediaPipe 좌표 일치 여부
@@ -267,7 +270,7 @@ A안을 고른 이유: MVP에서 일이 가장 많은 부분은 루틴·타이�
 - MediaPipe Pose Landmarker: https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker , 웹: https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js , Android 설정: https://developers.google.com/edge/mediapipe/solutions/setup_android
 - Capacitor Android: https://capacitorjs.com/docs/android , 카메라 권한 처리 소스: https://github.com/ionic-team/capacitor/blob/main/android/capacitor/src/main/java/com/getcapacitor/BridgeWebChromeClient.java
 - SpeechSynthesis 호환표: https://github.com/mdn/browser-compat-data/blob/main/api/SpeechSynthesis.json , TTS 플러그인: https://github.com/capacitor-community/text-to-speech
-- Tauri 2.12: https://v2.tauri.app/blog/tauri-2.12/ , PermissionKind: https://docs.rs/tauri/latest/tauri/webview/enum.PermissionKind.html
+- Electron: https://www.electronjs.org/docs/latest/ (protocol, session 권한 핸들러), 폐기된 Tauri 검토 자료: https://v2.tauri.app/blog/tauri-2.12/
 - ONNX Runtime Web: https://onnxruntime.ai/docs/tutorials/web/ , LiteRT: https://developers.google.com/edge/litert , PyTorch ONNX: https://docs.pytorch.org/docs/2.15/onnx.html
 - MediaPipe JS/Python 차이 이슈: https://github.com/google-ai-edge/mediapipe/issues/5402
 - Apple 멤버십 비교: https://developer.apple.com/support/compare-memberships/

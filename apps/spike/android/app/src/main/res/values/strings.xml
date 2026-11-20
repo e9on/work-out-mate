@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Work Out Mate 시험</string>
+    <string name="title_activity_main">Work Out Mate 시험</string>
+    <string name="package_name">com.workoutmate.spike</string>
+    <string name="custom_url_scheme">com.workoutmate.spike</string>
+</resources>
