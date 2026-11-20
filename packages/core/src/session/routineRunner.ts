@@ -150,16 +150,20 @@ export class RoutineRunner {
   /**
    * 지금 운동의 남은 세트를 건너뛰고 그다음 운동의 첫 세트(waitingReady)로 간다. 쉬는 시간은 두지 않는다.
    * 세트 중이면 반복이 있을 때만(count>0 또는 heldMs>0) 그만하기로 끝내 기록한다.
-   * 쉬는 시간 중이면 restEnd를 내고 넘어간다. 다음 운동이 없으면 routineEnd(completed false).
+   * 쉬는 시간 중이면 restEnd를 내고 넘어간다. 같은 운동의 남은 세트를 버릴 때만 completed가 false가 되고,
+   * 운동 사이 쉬는 시간이면 건너뛴 세트가 없어 skipRest와 같다. 다음 운동이 없으면 routineEnd.
    * 일시정지 중이면 일시정지를 풀고 진행한다.
    */
   skipExercise(t: number): RoutineEvent[] {
     if (this.ph === 'done') return [];
     const out = this.takePending();
     const now = Math.max(t, this.lastT);
-    this.interrupted = true;
-    if (this.ph === 'set') this.stopSet(t, out);
-    else {
+    if (this.ph === 'set') {
+      this.interrupted = true;
+      this.stopSet(t, out);
+    } else {
+      // 쉬는 시간: 같은 운동의 남은 세트를 버릴 때만 건너뛴 것이다. 운동 사이 쉬는 시간이면 skipRest와 같다.
+      if (this.rest && this.rest.next.exerciseIndex === this.pos.exerciseIndex) this.interrupted = true;
       this.rest = null;
       out.push({ type: 'restEnd' });
     }
