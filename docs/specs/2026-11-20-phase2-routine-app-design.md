@@ -193,7 +193,10 @@ type WorkoutSession = { id: string; routineId: string; routineName: string; star
 ### 5.7 CSP (#5)
 앱 `index.html`에 CSP를 넣는다.
 - `default-src 'self'; connect-src 'self' blob: data:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' blob: data:; media-src 'self' blob: mediastream:`
-- MediaPipe wasm·모델 로딩과 Capacitor·Electron 환경에서 실제로 동작하는지 확인한다. [확인 필요]
+- MediaPipe wasm·모델 로딩과 Capacitor·Electron 환경에서 실제로 동작하는지 확인한다. [확인함, 2026-11-20 시험용 앱]
+  - Electron 자가 점검: 위 CSP 그대로 랜드마커 4종(lite/full × GPU/CPU) 생성 성공, wasm·모델 로딩 오류 없음. fetch·XHR·sendBeacon의 외부 요청은 CSP 위반 이벤트 3건으로 renderer에서 막힘(CSP가 없을 때는 0건이고 main의 webRequest가 대신 막음). 값을 넓힌 지시어는 없다.
+  - 주의: `default-src 'self'`가 `<style>` 인라인도 막는다. 앱 CSS는 인라인 `<style>`이 아니라 외부 css 파일로 둔다(빌드에서는 Vite가 그렇게 만든다). 개발 서버만 Vite가 CSS를 `<style>`로 주입하고 HMR 웹소켓을 쓰므로 `style-src 'unsafe-inline'`과 `connect-src ws: wss:`를 개발 모드에만 더한다.
+  - Android(Capacitor) APK 빌드는 성공. 실기기(S23) 동작은 사용자 확인 대기.
 
 ## 6. 2b: 앱 설계 (`apps/app`)
 

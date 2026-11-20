@@ -1,3 +1,4 @@
+import './style.css';
 import { createTracker, EXERCISES, type ExerciseId, type TrackerState } from '@wom/core';
 import { createLandmarker, detect, drawPose, type Delegate, type Landmarker, type ModelName } from './pose';
 import { Capacitor } from '@capacitor/core';
@@ -312,6 +313,39 @@ async function runSelfTest(): Promise<void> {
         say(`외부 요청 실패(정상): ${u} (${e instanceof Error ? e.message : String(e)})`);
       }
     }
+    // renderer 단계 차단(CSP) 확인: fetch / XMLHttpRequest / sendBeacon 을 시도하고 securitypolicyviolation 이벤트를 센다.
+    const violations: string[] = [];
+    document.addEventListener('securitypolicyviolation', (ev) => violations.push(`${ev.violatedDirective} ${ev.blockedURI}`));
+    const target = 'https://example.com/csp-probe';
+    try {
+      await realFetch(`${target}?fetch`, { mode: 'no-cors' });
+      say('CSP 시도 fetch: 통과');
+    } catch (e) {
+      say(`CSP 시도 fetch: 실패 (${e instanceof Error ? e.message : String(e)})`);
+    }
+    await new Promise<void>((resolve) => {
+      const x = new XMLHttpRequest();
+      x.onloadend = () => {
+        say(`CSP 시도 XHR: 종료 status=${x.status}`);
+        resolve();
+      };
+      try {
+        x.open('GET', `${target}?xhr`);
+        x.send();
+      } catch (e) {
+        say(`CSP 시도 XHR: 예외 ${e instanceof Error ? e.message : String(e)}`);
+        resolve();
+      }
+    });
+    let beacon: boolean | string;
+    try {
+      beacon = navigator.sendBeacon(`${target}?beacon`, 'x');
+    } catch (e) {
+      beacon = `예외 ${e instanceof Error ? e.message : String(e)}`;
+    }
+    say(`CSP 시도 sendBeacon: 반환=${String(beacon)}`);
+    await new Promise((r) => setTimeout(r, 500));
+    say(`CSP 위반 이벤트 ${violations.length}건: ${JSON.stringify(violations)}`);
     try {
       await fetch('https://odml.pa.googleapis.com/v1/log');
       say('텔레메트리 통과(문제)');
