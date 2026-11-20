@@ -1,7 +1,7 @@
 # Work Out Mate — Phase 2 설계: 손 안 대는 루틴 앱
 
 - 작성일: 2026-11-20
-- 상태: 초안 (승인 전). 빌더 검토 질문 3개 반영(2026-11-20)
+- 상태: 승인됨(2026-11-20). 빌더 검토 질문 3개 반영
 - 근거
   - Phase 1 설계 `docs/specs/2026-11-18-work-out-mate-mvp-design.md`
   - Phase 0 결과 `docs/phase0-results.md`
