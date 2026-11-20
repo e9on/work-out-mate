@@ -26,3 +26,6 @@ export type {
   StateFor,
 } from './exercises/runner';
 export type { RecordingFile } from './recording';
+export { SetRunner } from './session/setRunner';
+export type { SetConfig, SetPhase, SetEvent } from './session/setRunner';
+export type { Target, EndReason, SetResult } from './session/model';
