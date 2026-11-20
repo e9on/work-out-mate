@@ -90,25 +90,31 @@ function meanVisibleArms(f: PoseFrame): number | null {
   return l ?? r;
 }
 
-/** 보이는(visibility ≥ 0.5) 점들의 image 좌표 평균. 하나도 안 보이면 null */
-function visibleMid(f: PoseFrame, idx: readonly number[]): { x: number; y: number } | null {
-  const pts = idx.map((i) => f.image[i]).filter((p) => p !== undefined && p.visibility >= MIN_VISIBILITY);
+/** 보이는(image visibility ≥ 0.5) 점들의 world 좌표 평균. 하나도 안 보이면 null */
+function visibleMidWorld(f: PoseFrame, idx: readonly number[]): { x: number; y: number; z: number } | null {
+  const pts = idx
+    .filter((i) => (f.image[i]?.visibility ?? 0) >= MIN_VISIBILITY)
+    .map((i) => f.world[i])
+    .filter((p) => p !== undefined);
   if (pts.length === 0) return null;
-  return { x: pts.reduce((s, p) => s + p!.x, 0) / pts.length, y: pts.reduce((s, p) => s + p!.y, 0) / pts.length };
+  const n = pts.length;
+  return { x: pts.reduce((s, p) => s + p!.x, 0) / n, y: pts.reduce((s, p) => s + p!.y, 0) / n, z: pts.reduce((s, p) => s + p!.z, 0) / n };
 }
 
 /**
- * 몸통(어깨 중점 → 엉덩이 중점, image 좌표)이 수평에서 기운 각도(0 = 수평, 90 = 수직).
- * 한쪽 어깨·엉덩이만 보여도 그 점을 쓴다(옆에서 찍으면 먼 쪽이 가려지므로). 어깨나 엉덩이가 전혀 안 보이면 null.
- * 이미지 크기를 모르므로 정규화 좌표 그대로 계산한다.
+ * 몸통(어깨 중점 → 엉덩이 중점, world 좌표)이 수평면에서 기운 각도(0 = 수평, 90 = 수직).
+ * world는 미터 단위라 화면 비율에 영향받지 않는다. 기울기 = atan2(|dy|, hypot(dx, dz)).
+ * 한쪽 어깨·엉덩이만 보여도(image visibility 기준) 그 점을 쓴다(옆에서 찍으면 먼 쪽이 가려지므로).
+ * 어깨나 엉덩이가 전혀 안 보이거나 값이 유한하지 않으면 null.
  */
 function torsoTiltFromHorizontal(f: PoseFrame): number | null {
-  const sh = visibleMid(f, [LM.L_SHOULDER, LM.R_SHOULDER]);
-  const hip = visibleMid(f, [LM.L_HIP, LM.R_HIP]);
+  const sh = visibleMidWorld(f, [LM.L_SHOULDER, LM.R_SHOULDER]);
+  const hip = visibleMidWorld(f, [LM.L_HIP, LM.R_HIP]);
   if (!sh || !hip) return null;
-  const dx = Math.abs(hip.x - sh.x), dy = Math.abs(hip.y - sh.y);
-  if (dx === 0 && dy === 0) return null;
-  return (Math.atan2(dy, dx) * 180) / Math.PI;
+  const dy = Math.abs(hip.y - sh.y), dh = Math.hypot(hip.x - sh.x, hip.z - sh.z);
+  if (dy === 0 && dh === 0) return null;
+  const a = (Math.atan2(dy, dh) * 180) / Math.PI;
+  return Number.isFinite(a) ? a : null;
 }
 
 /** 엎드림·누움(푸시업·벤치): 몸통이 수평에서 35° 이내 */

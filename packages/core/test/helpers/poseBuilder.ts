@@ -13,8 +13,9 @@ export type PoseOpts = {
   /** visibility를 0으로 만들 랜드마크 인덱스. */
   hidden?: number[];
   /**
-   * image 좌표의 몸통(어깨·엉덩이) 방향. 기본 'upright'(어깨 위, 엉덩이 아래로 수직).
-   * 'flat'이면 어깨→엉덩이가 수평(엎드림·누움). world 좌표(각도 신호)는 바꾸지 않는다.
+   * 몸통(어깨·엉덩이) 방향. 기본 'upright'(어깨 위, 엉덩이 아래로 수직).
+   * 'flat'이면 어깨→엉덩이가 수평(엎드림·누움). image는 어깨·엉덩이를, world는 엉덩이만 옮긴다
+   * (world 어깨는 그대로라 팔꿈치 각도 신호는 바뀌지 않는다).
    */
   torso?: 'upright' | 'flat';
 };
@@ -79,7 +80,12 @@ export function buildPose(opts: PoseOpts): PoseFrame {
     imagePts[11] = [0.3, 0.49]; imagePts[12] = [0.3, 0.51];
     imagePts[23] = [0.6, 0.49]; imagePts[24] = [0.6, 0.51];
   }
-  return { t, image: make(imagePts), world: make(pts) };
+  const worldPts = pts.map((p) => [...p] as P);
+  if (torso === 'flat') {
+    // world 몸통도 수평: 엉덩이를 어깨(y≈0.3) 높이로 옆에 둔다. 어깨는 그대로 둬 팔 각도를 보존한다.
+    worldPts[23] = [0.9, 0.3]; worldPts[24] = [0.9, 0.31];
+  }
+  return { t, image: make(imagePts), world: make(worldPts) };
 }
 
 /** 각도 값 배열을 프레임 열로. key 각도만 values로 바꾸고 나머지는 extra를 따른다. */

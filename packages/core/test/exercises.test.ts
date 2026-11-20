@@ -330,3 +330,53 @@ describe('수정 1회차: 준비 자세 확인(몸통 방향)', () => {
     expect(s.calibrating).toBe(true);
   });
 });
+
+describe('몸통 기울기는 world 좌표 기준(#3)', () => {
+  type Pt = { x: number; y: number; z: number };
+  type Frame = ReturnType<typeof buildPose>;
+  /** 어깨(11,12)를 s, 엉덩이(23,24)를 h에 둔 사본. which로 world/image 중 어느 쪽을 바꿀지 고른다. */
+  function withTorso(f: Frame, which: 'world' | 'image', s: Pt, h: Pt): Frame {
+    const edit = (lm: Frame['world']) =>
+      lm.map((p, i) => {
+        if (i === LM.L_SHOULDER || i === LM.R_SHOULDER) return { ...p, ...s };
+        if (i === LM.L_HIP || i === LM.R_HIP) return { ...p, ...h };
+        return p;
+      });
+    return { ...f, [which]: edit(f[which]) };
+  }
+  const deg = (d: number) => (d * Math.PI) / 180;
+  const ready = (id: 'pushup' | 'squat' | 'dumbbellBench', f: Frame) =>
+    (EXERCISES[id] as unknown as { ready(f: Frame): boolean | null }).ready(f);
+  const HORIZ_S = { x: -0.25, y: 0, z: 0 }, HORIZ_H = { x: 0.25, y: 0, z: 0 };
+
+  it('world는 수평인데 image는 세로로 서 있어도 lyingReady는 true', () => {
+    const f = withTorso(buildPose({ t: 0 }), 'world', HORIZ_S, HORIZ_H);
+    expect(ready('pushup', f)).toBe(true);
+    expect(ready('dumbbellBench', f)).toBe(true);
+    expect(ready('squat', f)).toBe(false);
+  });
+
+  it('world는 수평인데 image만 가로로 1.78배 늘려도 true', () => {
+    const base = withTorso(buildPose({ t: 0 }), 'world', HORIZ_S, HORIZ_H);
+    const stretched = withTorso(base, 'image', { x: 0.3, y: 0.4, z: 0 }, { x: 0.3 + 0.2 * 1.78, y: 0.5, z: 0 });
+    expect(ready('pushup', stretched)).toBe(true);
+  });
+
+  it('world 기준 수평에서 50° 기울면 image가 수평이어도 false', () => {
+    const t = deg(50);
+    const tilted = withTorso(buildPose({ t: 0 }), 'world', { x: 0, y: 0, z: 0 }, { x: 0.5 * Math.cos(t), y: 0.5 * Math.sin(t), z: 0 });
+    const f = withTorso(tilted, 'image', { x: 0.3, y: 0.5, z: 0 }, { x: 0.6, y: 0.5, z: 0 });
+    expect(ready('pushup', f)).toBe(false);
+  });
+
+  it('world 기준 수직이면 image가 수평이어도 squat ready는 true', () => {
+    const f = withTorso(buildPose({ t: 0 }), 'image', { x: 0.3, y: 0.5, z: 0 }, { x: 0.6, y: 0.5, z: 0 });
+    expect(ready('squat', f)).toBe(true);
+    expect(ready('pushup', f)).toBe(false);
+  });
+
+  it('깊이(z) 방향으로 누운 몸통도 수평으로 본다', () => {
+    const f = withTorso(buildPose({ t: 0 }), 'world', { x: 0, y: 0, z: -0.25 }, { x: 0, y: 0, z: 0.25 });
+    expect(ready('pushup', f)).toBe(true);
+  });
+});
