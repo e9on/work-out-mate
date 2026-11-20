@@ -28,4 +28,15 @@ export type {
 export type { RecordingFile } from './recording';
 export { SetRunner } from './session/setRunner';
 export type { SetConfig, SetPhase, SetEvent } from './session/setRunner';
-export type { Target, EndReason, SetResult } from './session/model';
+export type {
+  Target,
+  EndReason,
+  SetResult,
+  RoutineExercise,
+  Routine,
+  SetLog,
+  WorkoutSession,
+} from './session/model';
+export { RoutineRunner } from './session/routineRunner';
+export type { RoutineEvent, RoutineRunnerOptions, RoutinePhase } from './session/routineRunner';
+export { recommendNext, completedCount } from './session/recommend';

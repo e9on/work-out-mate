@@ -26,3 +26,33 @@ export type SetResult = {
   endT: number;
   endReason: EndReason;
 };
+
+/** 루틴 안의 운동 하나: 세트 수, 세트 목표, 이 운동 세트 앞의 쉬는 시간(초) */
+export type RoutineExercise = { exercise: ExerciseId; sets: number; target: Target; restSec: number };
+
+export type Routine = {
+  id: string;
+  name: string;
+  /** 오늘의 루틴 추천 순서(작을수록 앞) */
+  order: number;
+  exercises: RoutineExercise[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** 세션에 담기는 세트 기록. restTakenMs = 이전 기록 세트의 endT부터 이 세트 startT까지(첫 세트는 null) */
+export type SetLog = SetResult & { setIndex: number; restTakenMs: number | null };
+
+/**
+ * 루틴 한 번 진행한 기록. startedAt·endedAt은 RoutineRunner의 toEpoch로 바꾼 시각이다.
+ * completed는 모든 운동의 모든 세트가 그만하기(manual) 아닌 사유로 끝나고 건너뛰기·그만하기가 없었을 때만 true.
+ */
+export type WorkoutSession = {
+  id: string;
+  routineId: string;
+  routineName: string;
+  startedAt: number;
+  endedAt: number;
+  completed: boolean;
+  sets: SetLog[];
+};
