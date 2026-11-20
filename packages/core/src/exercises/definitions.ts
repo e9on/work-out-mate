@@ -8,23 +8,34 @@ import type { HoldConfig } from '../counter/holdTimer';
 
 export type ExerciseId = 'squat' | 'pushup' | 'dumbbellBench' | 'pullup' | 'negative' | 'deadHang';
 
-type RepExerciseBase = {
+/** 시작 방식: 'calibrate' 준비 자세 보정 / 'pose' 시작 자세를 잡으면 시작 / 'visible' 몸이 보이면 바로 시작 */
+export type StartMode = 'calibrate' | 'pose' | 'visible';
+
+type ExerciseCommon = {
+  start: StartMode;
+  /** 시작한 뒤 이 시간(ms) 동안 아무 진행이 없으면 세션을 끝낸다 */
+  idleEndMs: number;
+  /** start === 'pose'일 때 시작 자세인지. 판단할 관절이 안 보이면 null */
+  startPose?(f: PoseFrame): boolean | null;
+};
+
+type RepExerciseBase = ExerciseCommon & {
   id: Exclude<ExerciseId, 'deadHang'>;
   kind: 'reps';
   signal(f: PoseFrame): number | null;
 };
 /** 고정 임계값 카운터(RepCounter)를 쓰는 운동 */
-export type FixedRepExerciseDef = RepExerciseBase & { rep: RepConfig; adaptive?: never; ready?: never };
+export type FixedRepExerciseDef = RepExerciseBase & { mode: 'fixed'; rep: RepConfig };
 /** 준비 자세 기준 카운터(AdaptiveRepCounter)를 쓰는 운동 */
 export type AdaptiveRepExerciseDef = RepExerciseBase & {
+  mode: 'adaptive';
   adaptive: AdaptiveConfig;
   /** 이 프레임이 준비 자세인지(보정 중에만 쓴다). 판단할 관절이 안 보이면 null */
   ready(f: PoseFrame): boolean | null;
-  rep?: never;
 };
-/** `def.adaptive`가 있으면 준비 자세 기준, 없으면 `def.rep` 고정 임계값. */
+/** `mode`가 'adaptive'면 준비 자세 기준, 'fixed'면 `rep` 고정 임계값. */
 export type RepExerciseDef = FixedRepExerciseDef | AdaptiveRepExerciseDef;
-export type HoldExerciseDef = {
+export type HoldExerciseDef = ExerciseCommon & {
   id: 'deadHang';
   kind: 'hold';
   holding(f: PoseFrame): boolean | null;
@@ -82,12 +93,6 @@ function betterSideAngle(f: PoseFrame, left: Triple, right: Triple): number | nu
 
 const armAngle = (f: PoseFrame) => betterSideAngle(f, L_ARM, R_ARM);
 
-function bothArmsMean(f: PoseFrame): number | null {
-  if (!visibleEnough(f, [...L_ARM, ...R_ARM], MIN_VISIBILITY)) return null;
-  const l = angleOf(f, L_ARM), r = angleOf(f, R_ARM);
-  return l === null || r === null ? null : (l + r) / 2;
-}
-
 /** 양팔 평균. 한쪽만 보이면 그쪽, 둘 다 안 보이면 null. */
 function meanVisibleArms(f: PoseFrame): number | null {
   const l = visibleEnough(f, L_ARM, MIN_VISIBILITY) ? angleOf(f, L_ARM) : null;
@@ -96,25 +101,47 @@ function meanVisibleArms(f: PoseFrame): number | null {
   return l ?? r;
 }
 
-/** 보이는(visibility ≥ 0.5) 점들의 image 좌표 평균. 하나도 안 보이면 null */
-function visibleMid(f: PoseFrame, idx: readonly number[]): { x: number; y: number } | null {
-  const pts = idx.map((i) => f.image[i]).filter((p) => p !== undefined && p.visibility >= MIN_VISIBILITY);
-  if (pts.length === 0) return null;
-  return { x: pts.reduce((s, p) => s + p!.x, 0) / pts.length, y: pts.reduce((s, p) => s + p!.y, 0) / pts.length };
+const vis = (f: PoseFrame, i: number) => f.image[i]?.visibility ?? 0;
+
+type P3 = { x: number; y: number; z: number };
+const mid3 = (a: P3, b: P3): P3 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
+
+/**
+ * 몸통의 world 좌표 양 끝점(어깨 중점·엉덩이 중점). 가시성 판단은 image visibility, 좌표는 world를 쓴다
+ * (world에는 visibility 신뢰도가 없고, 화면 비율 왜곡은 image 좌표에만 있다).
+ * 양쪽 어깨·엉덩이가 모두 보이면 중점. 아니면 같은 쪽 어깨·엉덩이가 둘 다 보이는 쪽(두 점 visibility의
+ * 작은 값이 더 큰 쪽)을 쓴다. world에서 반대편끼리 짝지으면 z 차이가 섞여 기울기가 왜곡되기 때문이다.
+ * 같은 쪽 짝이 없으면 null.
+ */
+function torsoEndsWorld(f: PoseFrame): { sh: P3; hip: P3 } | null {
+  const ok = (i: number) => vis(f, i) >= MIN_VISIBILITY && f.world[i] !== undefined;
+  if ([LM.L_SHOULDER, LM.R_SHOULDER, LM.L_HIP, LM.R_HIP].every(ok)) {
+    return {
+      sh: mid3(f.world[LM.L_SHOULDER]!, f.world[LM.R_SHOULDER]!),
+      hip: mid3(f.world[LM.L_HIP]!, f.world[LM.R_HIP]!),
+    };
+  }
+  const sides = [[LM.L_SHOULDER, LM.L_HIP], [LM.R_SHOULDER, LM.R_HIP]] as const;
+  const usable = sides.filter(([s, h]) => ok(s) && ok(h));
+  if (usable.length === 0) return null;
+  const [s, h] = usable.reduce((best, c) =>
+    Math.min(vis(f, c[0]), vis(f, c[1])) > Math.min(vis(f, best[0]), vis(f, best[1])) ? c : best,
+  );
+  return { sh: f.world[s]!, hip: f.world[h]! };
 }
 
 /**
- * 몸통(어깨 중점 → 엉덩이 중점, image 좌표)이 수평에서 기운 각도(0 = 수평, 90 = 수직).
- * 한쪽 어깨·엉덩이만 보여도 그 점을 쓴다(옆에서 찍으면 먼 쪽이 가려지므로). 어깨나 엉덩이가 전혀 안 보이면 null.
- * 이미지 크기를 모르므로 정규화 좌표 그대로 계산한다.
+ * 몸통(어깨→엉덩이, world 좌표)이 수평면에서 기운 각도(0 = 수평, 90 = 수직).
+ * world는 미터 단위라 화면 비율에 영향받지 않는다. 기울기 = atan2(|dy|, hypot(dx, dz)).
+ * 어깨나 엉덩이가 안 보이거나 값이 유한하지 않으면 null.
  */
 function torsoTiltFromHorizontal(f: PoseFrame): number | null {
-  const sh = visibleMid(f, [LM.L_SHOULDER, LM.R_SHOULDER]);
-  const hip = visibleMid(f, [LM.L_HIP, LM.R_HIP]);
-  if (!sh || !hip) return null;
-  const dx = Math.abs(hip.x - sh.x), dy = Math.abs(hip.y - sh.y);
-  if (dx === 0 && dy === 0) return null;
-  return (Math.atan2(dy, dx) * 180) / Math.PI;
+  const e = torsoEndsWorld(f);
+  if (!e) return null;
+  const dy = Math.abs(e.hip.y - e.sh.y), dh = Math.hypot(e.hip.x - e.sh.x, e.hip.z - e.sh.z);
+  if (dy === 0 && dh === 0) return null;
+  const a = (Math.atan2(dy, dh) * 180) / Math.PI;
+  return Number.isFinite(a) ? a : null;
 }
 
 /** 엎드림·누움(푸시업·벤치): 몸통이 수평에서 35° 이내 */
@@ -139,12 +166,32 @@ function deadHangHolding(f: PoseFrame): boolean | null {
   return wristsUp && l >= DEAD_HANG_MIN_ELBOW && r >= DEAD_HANG_MIN_ELBOW;
 }
 
-export const EXERCISES: Record<ExerciseId, ExerciseDef> = {
-  squat: { id: 'squat', kind: 'reps', signal: (f) => betterSideAngle(f, L_LEG, R_LEG), ready: uprightReady, adaptive: ADAPTIVE_CFG.squat },
-  pushup: { id: 'pushup', kind: 'reps', signal: armAngle, ready: lyingReady, adaptive: ADAPTIVE_CFG.pushup },
-  dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: bothArmsMean, ready: lyingReady, adaptive: ADAPTIVE_CFG.dumbbellBench },
+const IDLE_END_MS = 5000;
+
+export const EXERCISES = {
+  squat: {
+    id: 'squat', kind: 'reps', mode: 'adaptive', start: 'calibrate', idleEndMs: IDLE_END_MS,
+    signal: (f) => betterSideAngle(f, L_LEG, R_LEG), ready: uprightReady, adaptive: ADAPTIVE_CFG.squat,
+  },
+  pushup: {
+    id: 'pushup', kind: 'reps', mode: 'adaptive', start: 'calibrate', idleEndMs: IDLE_END_MS,
+    signal: armAngle, ready: lyingReady, adaptive: ADAPTIVE_CFG.pushup,
+  },
+  dumbbellBench: {
+    id: 'dumbbellBench', kind: 'reps', mode: 'adaptive', start: 'calibrate', idleEndMs: IDLE_END_MS,
+    signal: meanVisibleArms, ready: lyingReady, adaptive: ADAPTIVE_CFG.dumbbellBench,
+  },
   // 사용자 결정: 턱걸이는 팔꿈치 각도로만 판별한다(코·손목·철봉 위치는 보지 않음).
-  pullup: { id: 'pullup', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.pullup },
-  negative: { id: 'negative', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.negative },
-  deadHang: { id: 'deadHang', kind: 'hold', holding: deadHangHolding, hold: HOLD_CFG },
-};
+  pullup: {
+    id: 'pullup', kind: 'reps', mode: 'fixed', start: 'pose', idleEndMs: IDLE_END_MS,
+    signal: meanVisibleArms, startPose: deadHangHolding, rep: REP_CFG.pullup,
+  },
+  negative: {
+    id: 'negative', kind: 'reps', mode: 'fixed', start: 'visible', idleEndMs: 8000,
+    signal: meanVisibleArms, rep: REP_CFG.negative,
+  },
+  deadHang: {
+    id: 'deadHang', kind: 'hold', start: 'pose', idleEndMs: IDLE_END_MS,
+    holding: deadHangHolding, hold: HOLD_CFG,
+  },
+} satisfies Record<ExerciseId, ExerciseDef>;

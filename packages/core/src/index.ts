@@ -11,11 +11,32 @@ export type { HoldConfig } from './counter/holdTimer';
 export { EXERCISES, createTracker, replay } from './exercises/runner';
 export type {
   ExerciseId,
+  StartMode,
   ExerciseDef,
   RepExerciseDef,
   FixedRepExerciseDef,
   AdaptiveRepExerciseDef,
   HoldExerciseDef,
   TrackerState,
+  RepTrackerState,
+  HoldTrackerState,
+  Diagnosis,
+  Tracker,
+  ReplayResult,
+  StateFor,
 } from './exercises/runner';
 export type { RecordingFile } from './recording';
+export { SetRunner } from './session/setRunner';
+export type { SetConfig, SetPhase, SetEvent } from './session/setRunner';
+export type {
+  Target,
+  EndReason,
+  SetResult,
+  RoutineExercise,
+  Routine,
+  SetLog,
+  WorkoutSession,
+} from './session/model';
+export { RoutineRunner } from './session/routineRunner';
+export type { RoutineEvent, RoutineRunnerOptions, RoutinePhase, NextSet } from './session/routineRunner';
+export { recommendNext, completedCount } from './session/recommend';

@@ -1,3 +1,4 @@
+import './style.css';
 import { createTracker, EXERCISES, type ExerciseId, type TrackerState } from '@wom/core';
 import { createLandmarker, detect, drawPose, type Delegate, type Landmarker, type ModelName } from './pose';
 import { Capacitor } from '@capacitor/core';
@@ -103,9 +104,10 @@ function updateDiag(frame: import('@wom/core').PoseFrame): void {
     return;
   }
   const s = def.signal(frame);
-  const restSide = def.adaptive ? def.adaptive.restSide : def.rep.restSide;
-  if (state.count !== diagCount) {
-    diagCount = state.count;
+  const restSide = def.mode === 'adaptive' ? def.adaptive.restSide : def.rep.restSide;
+  const count = state.kind === 'reps' ? state.count : 0;
+  if (count !== diagCount) {
+    diagCount = count;
     diagExtreme = null;
   }
   if (s !== null) {
@@ -113,10 +115,10 @@ function updateDiag(frame: import('@wom/core').PoseFrame): void {
     if (deeper) diagExtreme = s;
   }
   let rule: string;
-  if (def.adaptive) {
+  if (def.mode === 'adaptive') {
     // 준비 자세 기준: 바닥 = 기준 - depth, 복귀 = 이번 최저 + rebound ('low'면 방향만 반대)
     const a = def.adaptive;
-    const b = state.baseline;
+    const b = state.kind === 'reps' ? state.baseline : null;
     const dir = a.restSide === 'high' ? 1 : -1;
     rule =
       b === null
@@ -137,7 +139,6 @@ function refreshHud(): void {
   while (doneTimes.length && now - doneTimes[0]! > 1000) doneTimes.shift();
   hud.render({
     state,
-    kind: EXERCISES[exerciseSel.value as ExerciseId].kind,
     fps: doneTimes.length,
     avgMs: inferMs.avg(),
     p95Ms: inferMs.p95(),
@@ -312,6 +313,39 @@ async function runSelfTest(): Promise<void> {
         say(`외부 요청 실패(정상): ${u} (${e instanceof Error ? e.message : String(e)})`);
       }
     }
+    // renderer 단계 차단(CSP) 확인: fetch / XMLHttpRequest / sendBeacon 을 시도하고 securitypolicyviolation 이벤트를 센다.
+    const violations: string[] = [];
+    document.addEventListener('securitypolicyviolation', (ev) => violations.push(`${ev.violatedDirective} ${ev.blockedURI}`));
+    const target = 'https://example.com/csp-probe';
+    try {
+      await realFetch(`${target}?fetch`, { mode: 'no-cors' });
+      say('CSP 시도 fetch: 통과');
+    } catch (e) {
+      say(`CSP 시도 fetch: 실패 (${e instanceof Error ? e.message : String(e)})`);
+    }
+    await new Promise<void>((resolve) => {
+      const x = new XMLHttpRequest();
+      x.onloadend = () => {
+        say(`CSP 시도 XHR: 종료 status=${x.status}`);
+        resolve();
+      };
+      try {
+        x.open('GET', `${target}?xhr`);
+        x.send();
+      } catch (e) {
+        say(`CSP 시도 XHR: 예외 ${e instanceof Error ? e.message : String(e)}`);
+        resolve();
+      }
+    });
+    let beacon: boolean | string;
+    try {
+      beacon = navigator.sendBeacon(`${target}?beacon`, 'x');
+    } catch (e) {
+      beacon = `예외 ${e instanceof Error ? e.message : String(e)}`;
+    }
+    say(`CSP 시도 sendBeacon: 반환=${String(beacon)}`);
+    await new Promise((r) => setTimeout(r, 500));
+    say(`CSP 위반 이벤트 ${violations.length}건: ${JSON.stringify(violations)}`);
     try {
       await fetch('https://odml.pa.googleapis.com/v1/log');
       say('텔레메트리 통과(문제)');
