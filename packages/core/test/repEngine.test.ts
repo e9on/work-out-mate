@@ -67,16 +67,17 @@ describe('특성: 오래 가림 뒤 복귀 프레임', () => {
     expect(c.count).toBe(1);
   });
 
-  it('Adaptive: 복귀 프레임은 peak만 다시 잡고 판정에 쓰지 않는다(재무장선 위여도 무장하지 않음)', () => {
+  it('Adaptive: 복귀 프레임에서 진행 중 반복을 버리고, 그 프레임(재무장선 위)으로 바로 재무장한다', () => {
+    // 통합 전에는 복귀 프레임에서 무장하지 않아 0이었다(Fixed와 맞춤).
     const c = calibrated168();
-    run(c, [
+    const ev = run(c, [
       [1100, 150], [1300, 110], // out → turned
       ...hold(null, 1400, 3500, 100), // 2초 가림
-      [3500, 168], // 복귀: rest, peak 168, 무장 안 함
-      [3533, 140], [3800, 110], [4200, 168], // 140 < 148이라 무장 전 → 시작 안 함
+      [3500, 168], // 복귀: 버림, peak 168, 168 > 148이라 무장
+      [3533, 140], [3800, 110], [4200, 168],
     ]);
-    expect(c.count).toBe(0);
-    expect(c.phase).toBe('rest');
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.startT).toBe(3533);
   });
 
   it('Adaptive: 보정 중에는 오래 가림을 따지지 않고, 복귀 프레임을 보정(타임아웃 기준점)에 쓴다', () => {
@@ -109,11 +110,22 @@ describe('특성: rest로 돌아온 프레임의 재무장', () => {
     expect(ev[1]!.startT).toBe(733);
   });
 
-  it('Adaptive: 확정 프레임이 재무장선 위여도 그 프레임에서는 무장하지 않는다', () => {
+  it('Adaptive: 확정 프레임이 재무장선 위면 그 프레임에서 무장한다', () => {
+    // 통합 전에는 확정 프레임에서 무장하지 않아 1이었다(Fixed와 맞춤).
+    const c = calibrated168();
+    const ev = run(c, [
+      [1100, 150], [1300, 120], [1700, 151], // 1회 확정(>120+30), 151 > 148이라 무장
+      [1733, 135], [2000, 100], [2400, 168], // 135 < 151−10이라 바로 시작
+    ]);
+    expect(ev).toHaveLength(2);
+    expect(ev[1]!.startT).toBe(1733);
+  });
+
+  it('Adaptive: 확정 프레임이 재무장선 아래면 무장하지 않는다(바닥 근처 흔들림으로 두 번 세지 않음)', () => {
     const c = calibrated168();
     run(c, [
-      [1100, 150], [1300, 120], [1700, 150], // 1회 확정(120+30), 150 ≥ 148이지만 무장 안 함
-      [1733, 135], [2000, 100], [2400, 168], // 135 < 148이라 시작 안 함
+      [1100, 150], [1300, 100], [1700, 140], // 1회 확정(>100+30), 140 < 148
+      [1733, 120], [2000, 100], [2400, 145], // 재무장선 아래에서만 움직임
     ]);
     expect(c.count).toBe(1);
   });
@@ -128,24 +140,15 @@ describe('특성: rest로 돌아온 프레임의 재무장', () => {
     expect(ev[0]!.startT).toBe(333);
   });
 
-  it('Adaptive: 미달 복귀 프레임이 재무장선 위여도 그 프레임에서는 무장하지 않는다', () => {
-    const c = calibrated168();
-    run(c, [
-      [1100, 155], [1200, 164], // 시작(≤158) → 미달 복귀(≥163), peak 164
-      [1233, 140], [1500, 100], [1900, 168],
-    ]);
-    expect(c.count).toBe(0);
-  });
-
-  it('Adaptive: 무장하는 프레임에서 시작선도 바로 본다', () => {
+  it('Adaptive: 미달 복귀 프레임이 재무장선 위면 그 프레임에서 무장한다', () => {
+    // 통합 전에는 미달 복귀 프레임에서 무장하지 않아 0이었다(Fixed와 맞춤).
     const c = calibrated168();
     const ev = run(c, [
-      [1100, 150], [1300, 125], [1700, 165], // 1회 확정, peak 165, 무장 안 함
-      [1733, 150], // 150 ≥ 148 무장 + 150 ≤ 155 시작
-      [2000, 110], [2400, 168],
+      [1100, 155], [1200, 164], // 시작(<158) → 미달 복귀(>163), peak 164, 무장
+      [1233, 140], [1500, 100], [1900, 168],
     ]);
-    expect(ev).toHaveLength(2);
-    expect(ev[1]!.startT).toBe(1733);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.startT).toBe(1233);
   });
 });
 
@@ -173,21 +176,32 @@ describe('특성: 경계값 비교', () => {
     expect(ev[0]!.startT).toBe(100);
   });
 
-  it('Adaptive: 재무장·시작·바닥·복귀·미달 복귀 모두 경계값과 같으면 넘은 것으로 본다', () => {
+  it('Adaptive: Fixed와 같이 재무장·시작·복귀·미달 복귀는 넘어야, 바닥은 같아도 도달', () => {
+    // 통합 전에는 Adaptive만 경계값과 같아도 넘은 것으로 봤다.
     const c = calibrated168();
     const ev = run(c, [
-      [1100, 158], // == peak−10: 시작
+      [1100, 158], // == peak−10: 시작 안 함
+      [1133, 157], // 시작
       [1300, 128], // == base−depth: 바닥
       [1500, 120],
-      [1700, 150], // == valley+rebound: 확정, peak 150
-      [1733, 148], // == 재무장선: 무장
-      [1766, 140], // == peak−10: 시작
-      [1900, 145], // == peak−startDrop/2: 미달 복귀
+      [1700, 150], // == valley+rebound: 확정 안 함
+      [1733, 151], // 확정, peak 151, 무장
+      [1766, 141], // == peak−10: 시작 안 함
+      [1800, 140], // 시작
+      [1900, 146], // == peak−startDrop/2: 미달 복귀 아님
     ]);
     expect(ev).toHaveLength(1);
-    expect(ev[0]).toMatchObject({ startT: 1100, turnT: 1300, endT: 1700 });
-    expect(c.count).toBe(1);
+    expect(ev[0]).toMatchObject({ startT: 1133, turnT: 1300, endT: 1733 });
+    expect(c.phase).toBe('out');
+    run(c, [
+      [2000, 147], // 미달 복귀, 147 < 148이라 무장 안 함
+      [2033, 148], // == 재무장선: 무장 안 함
+      [2066, 130], // 무장 전이라 시작 안 함
+    ]);
     expect(c.phase).toBe('rest');
+    run(c, [[2100, 149], [2133, 138]]); // 무장 → 시작(< 149−10)
+    expect(c.phase).toBe('out');
+    expect(c.count).toBe(1);
   });
 });
 
@@ -242,7 +256,7 @@ describe('RepEngine + adaptiveStrategy', () => {
     expect(judge.baseline).toBe(168);
     expect(judge.calibrationSource).toBe('measured');
     expect(e.phase).toBe('rest');
-    const ev = run(e, [[1100, 150], [1300, 120], [1700, 150]]);
+    const ev = run(e, [[1100, 150], [1300, 120], [1700, 151]]);
     expect(ev).toEqual([{ index: 1, startT: 1100, turnT: 1300, endT: 1700, outMs: 200, backMs: 400 }]);
   });
 
@@ -271,8 +285,6 @@ describe('RepEngine: 껍데기는 전략이 정한 선만으로 판정한다', (
   function fake(readyAfter: number): JudgeStrategy & { calls: number } {
     return {
       calls: 0,
-      inclusive: false,
-      armOnEntry: true,
       ready() { return this.calls >= readyAfter; },
       calibrate() { this.calls += 1; },
       startLine: () => 50,

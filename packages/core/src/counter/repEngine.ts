@@ -32,19 +32,10 @@ export function restSign(side: RestSide): 1 | -1 {
 
 /**
  * 판정 전략. 껍데기(RepEngine)가 상태·시간·가림·재무장·이벤트를 맡고, 전략은 "선"만 정한다.
- * 모든 값은 내부 부호 기준(시작 자세 쪽이 크다)이다.
+ * 모든 값은 내부 부호 기준(시작 자세 쪽이 크다)이다. 비교는 껍데기가 한다:
+ * 시작은 s < 선, 반환점은 s ≤ 선, 복귀·미달 복귀·재무장은 s > 선(경계값과 같으면 반환점만 도달).
  */
 export interface JudgeStrategy {
-  /**
-   * 시작·복귀·미달 복귀·재무장 비교에 경계값을 포함하는지. 반환점은 항상 포함(s ≤ turnLine).
-   * false: 시작 s < line, 나머지 s > line / true: 시작 s ≤ line, 나머지 s ≥ line
-   */
-  readonly inclusive: boolean;
-  /**
-   * rest로 돌아온 그 프레임(확정·미달 복귀·오래 가림 복귀·보정 직후)에서 재무장선을 바로 검사하는지.
-   * false면 다음 프레임부터 검사한다. 반환점 확정(countAt 'turn') 뒤에는 이 값과 관계없이 검사하지 않는다.
-   */
-  readonly armOnEntry: boolean;
   /** 판정할 준비가 됐는지. false인 동안 껍데기는 'calibrating'이고 프레임을 calibrate()로만 넘긴다 */
   ready(): boolean;
   /** 준비 전 프레임마다 호출. s가 null이면 가림 */
@@ -70,7 +61,9 @@ type Inner = 'calibrating' | 'rest' | 'out' | 'turned';
  *
  * - 가림: null이 들어오는 동안 'paused'. pauseAfterMs 이상 이어졌으면 신호가 돌아온 프레임에서
  *   진행 중 반복을 버리고 rest로 간다(그 프레임은 판정하지 않음). 준비 전(calibrating)에는 따지지 않는다.
- * - 재무장: rest로 돌아가면 재무장선을 한 번 지나야 다음 반복을 시작한다.
+ * - 재무장: rest로 돌아가면 재무장선을 한 번 지나야 다음 반복을 시작한다. rest로 돌아온 그 프레임
+ *   (확정·미달 복귀·오래 가림 복귀·보정 직후)이 이미 재무장선 너머면 바로 무장한다.
+ *   반환점 확정(countAt 'turn') 뒤에는 그 프레임으로 무장하지 않는다.
  * - peak(rest 중 최고점)·valley(turned 중 최저점)를 추적해 전략의 선 계산에 넘긴다.
  * - 최소 시간: startT→endT가 minRepMs 미만이면 rest로 가되 세지 않는다.
  */
@@ -147,10 +140,10 @@ export class RepEngine {
       case 'rest':
         this.peak = Math.max(this.peak, s);
         if (!this.armed) {
-          if (!this.above(s, st.rearmLine())) return null;
+          if (s <= st.rearmLine()) return null;
           this.armed = true;
         }
-        if (this.below(s, st.startLine(this.peak))) {
+        if (s < st.startLine(this.peak)) {
           this.inner = 'out';
           this.startT = t;
         }
@@ -165,32 +158,24 @@ export class RepEngine {
             return this.finish(t);
           }
           this.inner = 'turned';
-        } else if (this.above(s, st.abortLine(this.peak))) {
+        } else if (s > st.abortLine(this.peak)) {
           // 반환점에 못 가고 돌아옴: 세지 않는다.
           this.toRest(s, true);
         }
         return null;
       case 'turned':
         this.valley = Math.min(this.valley, s);
-        if (!this.above(s, st.completeLine(this.valley))) return null;
+        if (s <= st.completeLine(this.valley)) return null;
         this.toRest(s, true);
         return this.finish(t);
     }
   }
 
-  private below(s: number, line: number): boolean {
-    return this.strategy.inclusive ? s <= line : s < line;
-  }
-
-  private above(s: number, line: number): boolean {
-    return this.strategy.inclusive ? s >= line : s > line;
-  }
-
-  /** rest로 돌아가며 peak를 지금 값에서 다시 시작한다. mayArm이고 전략이 허용하면 이 프레임으로 재무장을 검사한다. */
+  /** rest로 돌아가며 peak를 지금 값에서 다시 시작한다. mayArm이면 이 프레임으로 재무장을 검사한다. */
   private toRest(s: number, mayArm: boolean): void {
     this.inner = 'rest';
     this.peak = s;
-    this.armed = mayArm && this.strategy.armOnEntry && this.above(s, this.strategy.rearmLine());
+    this.armed = mayArm && s > this.strategy.rearmLine();
   }
 
   /** 최소 시간을 넘었으면 1회 확정하고 이벤트를 만든다. */

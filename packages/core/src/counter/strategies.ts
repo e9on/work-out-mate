@@ -2,18 +2,13 @@ import { restSign, type JudgeStrategy } from './repEngine';
 import type { RepConfig } from './repCounter';
 import type { AdaptiveConfig, CalibrationSource } from './adaptiveRepCounter';
 
-/**
- * 고정 임계값 판정. 시작 enter, 반환점 turn, 복귀·미달 복귀·재무장은 모두 exit.
- * 경계값은 넘어야(같으면 아님) 하고, rest로 돌아온 프레임에서 바로 재무장을 검사한다.
- */
+/** 고정 임계값 판정. 시작 enter, 반환점 turn, 복귀·미달 복귀·재무장은 모두 exit. */
 export function fixedStrategy(cfg: RepConfig): JudgeStrategy {
   const k = restSign(cfg.restSide);
   const enter = k * cfg.enter;
   const turn = k * cfg.turn;
   const exit = k * cfg.exit;
   return {
-    inclusive: false,
-    armOnEntry: true,
     ready: () => true,
     calibrate: () => {},
     startLine: () => enter,
@@ -40,15 +35,12 @@ const MIN_CALIBRATE_SAMPLES = 10;
  * 준비 자세 기준 판정. 처음에 준비 자세(신호가 잠시 안정된 값)를 baseline으로 잡고,
  * 바닥은 baseline − depth, 시작은 peak − startDrop, 복귀는 valley + rebound,
  * 미달 복귀는 peak − startDrop/2, 재무장선은 baseline − depth/2.
- * 경계값과 같으면 넘은 것으로 보고, rest로 돌아온 프레임에서는 재무장하지 않는다(다음 프레임부터).
  */
 export function adaptiveStrategy(cfg: AdaptiveConfig): AdaptiveStrategy {
   return new AdaptiveJudge(cfg);
 }
 
 class AdaptiveJudge implements AdaptiveStrategy {
-  readonly inclusive = true;
-  readonly armOnEntry = false;
   private readonly k: 1 | -1;
   /** 내부 부호 기준 baseline. null이면 아직 보정 전 */
   private base: number | null = null;
