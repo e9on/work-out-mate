@@ -754,6 +754,28 @@ describe('RoutineRunner: 수정 1회차', () => {
     expect(s.completed).toBe(false);
   });
 
+  it('운동 사이 쉬는 시간의 skipExercise는 건너뛴 세트가 없어 completed에 영향이 없다', () => {
+    const d = runner([sq(1, 2, 30), pu(1, 2, 30)]);
+    d.doSet('squat', 2);
+    expect(d.rr.phase).toBe('rest');
+    expect(d.skip().map((e) => e.type)).toEqual(['restEnd', 'exerciseStart']);
+    d.doSet('pushup', 2);
+    const s = sessionOf(d.log);
+    expect(s.sets).toHaveLength(2);
+    expect(s.completed).toBe(true);
+  });
+
+  it('같은 운동의 세트 사이 쉬는 시간의 skipExercise는 남은 세트를 건너뛰어 completed false', () => {
+    const d = runner([sq(2, 2, 30), pu(1, 2, 30)]);
+    d.doSet('squat', 2);
+    expect(d.rr.phase).toBe('rest');
+    d.skip();
+    d.doSet('pushup', 2);
+    const s = sessionOf(d.log);
+    expect(s.sets).toHaveLength(2);
+    expect(s.completed).toBe(false);
+  });
+
   it('매달리기 세트를 skip하면 heldMs > 0으로 manual 기록', () => {
     const d = runner([dh(2, 60, 30), sq(1, 2, 30)]);
     hangFrames(d, 500, false);

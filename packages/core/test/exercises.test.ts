@@ -73,13 +73,13 @@ describe('dumbbellBench', () => {
     const frames = series([...ready(170), ...oneRep(170, 85)], 'elbow', 33, { ...FLAT, hidden: [LM.L_ELBOW, LM.L_WRIST] });
     const r = replay('dumbbellBench', frames);
     expect(r.count).toBe(1);
-    expect(r.diagnosis).not.toBe('notVisible');
+    expect(r.diagnosis).toBe('ok');
   });
   it('한쪽 팔(13,15)만 hidden이어도 마찬가지', () => {
     const frames = series([...ready(170), ...oneRep(170, 85)], 'elbow', 33, { ...FLAT, hidden: [13, 15] });
     const r = replay('dumbbellBench', frames);
     expect(r.count).toBe(1);
-    expect(r.diagnosis).not.toBe('notVisible');
+    expect(r.diagnosis).toBe('ok');
   });
   it('양팔이 모두 hidden이면 count 0, paused', () => {
     const frames = series(oneRep(170, 85), 'elbow', 33, { hidden: [13, 15, 14, 16] });
