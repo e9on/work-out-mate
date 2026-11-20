@@ -82,12 +82,6 @@ function betterSideAngle(f: PoseFrame, left: Triple, right: Triple): number | nu
 
 const armAngle = (f: PoseFrame) => betterSideAngle(f, L_ARM, R_ARM);
 
-function bothArmsMean(f: PoseFrame): number | null {
-  if (!visibleEnough(f, [...L_ARM, ...R_ARM], MIN_VISIBILITY)) return null;
-  const l = angleOf(f, L_ARM), r = angleOf(f, R_ARM);
-  return l === null || r === null ? null : (l + r) / 2;
-}
-
 /** 양팔 평균. 한쪽만 보이면 그쪽, 둘 다 안 보이면 null. */
 function meanVisibleArms(f: PoseFrame): number | null {
   const l = visibleEnough(f, L_ARM, MIN_VISIBILITY) ? angleOf(f, L_ARM) : null;
@@ -142,7 +136,7 @@ function deadHangHolding(f: PoseFrame): boolean | null {
 export const EXERCISES: Record<ExerciseId, ExerciseDef> = {
   squat: { id: 'squat', kind: 'reps', signal: (f) => betterSideAngle(f, L_LEG, R_LEG), ready: uprightReady, adaptive: ADAPTIVE_CFG.squat },
   pushup: { id: 'pushup', kind: 'reps', signal: armAngle, ready: lyingReady, adaptive: ADAPTIVE_CFG.pushup },
-  dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: bothArmsMean, ready: lyingReady, adaptive: ADAPTIVE_CFG.dumbbellBench },
+  dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: meanVisibleArms, ready: lyingReady, adaptive: ADAPTIVE_CFG.dumbbellBench },
   // 사용자 결정: 턱걸이는 팔꿈치 각도로만 판별한다(코·손목·철봉 위치는 보지 않음).
   pullup: { id: 'pullup', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.pullup },
   negative: { id: 'negative', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.negative },

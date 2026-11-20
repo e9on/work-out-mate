@@ -66,14 +66,20 @@ describe('pullup은 팔꿈치 각도로만 판별', () => {
 });
 
 describe('dumbbellBench', () => {
-  it('한쪽 팔이 안 보이면 신호 null: count 0, paused', () => {
-    const frames = series(oneRep(170, 85), 'elbow', 33, { hidden: [LM.L_ELBOW, LM.L_WRIST] });
+  it('한쪽 팔(왼쪽)이 안 보여도 보이는 팔로 1회를 세고 paused는 false', () => {
+    const frames = series([...ready(170), ...oneRep(170, 85)], 'elbow', 33, { ...FLAT, hidden: [LM.L_ELBOW, LM.L_WRIST] });
     const r = replay('dumbbellBench', frames);
-    expect(r.count).toBe(0);
-    expect(r.paused).toBe(true);
+    expect(r.count).toBe(1);
+    expect(r.paused).toBe(false);
   });
   it('한쪽 팔(13,15)만 hidden이어도 마찬가지', () => {
-    const frames = series(oneRep(170, 85), 'elbow', 33, { hidden: [13, 15] });
+    const frames = series([...ready(170), ...oneRep(170, 85)], 'elbow', 33, { ...FLAT, hidden: [13, 15] });
+    const r = replay('dumbbellBench', frames);
+    expect(r.count).toBe(1);
+    expect(r.paused).toBe(false);
+  });
+  it('양팔이 모두 hidden이면 count 0, paused', () => {
+    const frames = series(oneRep(170, 85), 'elbow', 33, { hidden: [13, 15, 14, 16] });
     const r = replay('dumbbellBench', frames);
     expect(r.count).toBe(0);
     expect(r.paused).toBe(true);
