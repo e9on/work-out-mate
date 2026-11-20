@@ -175,6 +175,24 @@ describe('SetRunner: 철봉 운동(카운트다운 없음)', () => {
     expect(fin.result.count).toBe(0);
   });
 
+  it('deadHang: 매달려 3초 뒤 프레임이 끊기면 tick만으로 마지막 프레임 + 500ms에 released, heldMs 약 3000', () => {
+    const r = new SetRunner({ exercise: 'deadHang', target: { kind: 'seconds', seconds: 10 } });
+    const c = new Clock();
+    const out = feed(r, c.frames(hold(170, 500), 'elbow'));
+    const hangT = c.t;
+    feed(r, c.frames(hold(170, 3000), 'elbow', HANG), out);
+    const lastT = c.t - DT;
+    expect(r.phase).toBe('active');
+    tickTo(r, lastT + 200, lastT + 3000, 200, out);
+    const fin = finishedOf(out)!;
+    expect(fin).toBeDefined();
+    expect(fin.reason).toBe('released');
+    expect(fin.t - lastT).toBeGreaterThanOrEqual(500);
+    expect(fin.t - lastT).toBeLessThan(500 + 200);
+    expect(Math.abs(fin.result.heldMs - 3000)).toBeLessThanOrEqual(50);
+    expect(fin.result.heldMs).toBe(lastT - hangT);
+  });
+
   it('pullup: 매달린 자세 300ms → 카운트다운 없이 start, 그 뒤 1회 → rep 1', () => {
     const r = new SetRunner({ exercise: 'pullup', target: { kind: 'reps', reps: 5 } });
     const c = new Clock();
@@ -376,6 +394,21 @@ describe('SetRunner: hint', () => {
       expect(hints[b]!.t - hints[a]!.t).toBeLessThan(10000 + 40);
     }
     expect(r.phase).toBe('waitingReady');
+  });
+
+  it('calibratedByDefault hint는 세트당 한 번: 기본값 보정 뒤 active 30초 동안 정확히 1번', () => {
+    // 무릎이 140·180을 오가(EMA 뒤 폭 약 13°) 안정 구간을 못 잡음 → 보정 타임아웃(3초) 뒤 관측 최고점으로 보정(진단 calibratedByDefault).
+    const r = squat({ kind: 'reps', reps: 10 }, { noStartMs: 60000 });
+    const c = new Clock();
+    const wobble = Array.from({ length: 110 }, (_, i) => (i % 2 ? 140 : 180));
+    const out = feed(r, c.frames([...wobble, ...hold(175, 4000)], 'knee'), [], (e) => e.type === 'start');
+    const startT = first(out, 'start')!.t;
+    expect(r.tracker.diagnosis).toBe('calibratedByDefault');
+    feed(r, c.frames(hold(175, 30000), 'knee'), out);
+    expect(r.phase).toBe('active');
+    expect(c.t - startT).toBeGreaterThanOrEqual(30000);
+    const cbd = out.filter((x) => x.ev.type === 'hint' && x.ev.diagnosis === 'calibratedByDefault');
+    expect(cbd).toHaveLength(1);
   });
 });
 

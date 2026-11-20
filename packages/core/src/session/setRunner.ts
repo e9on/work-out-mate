@@ -22,7 +22,7 @@ export type SetConfig = {
   undoBeforeStopMs?: number;
   /** 마지막 반복 뒤 이 시간(ms) 동안 반복이 없으면 세트를 끝낸다. 기본은 운동 정의의 idleEndMs */
   idleEndMs?: number;
-  /** 같은 진단 hint를 다시 내기까지의 최소 간격(ms). 기본 10000 */
+  /** 같은 진단 hint를 다시 내기까지의 최소 간격(ms). 기본 10000. calibratedByDefault는 세트당 한 번만 */
   hintRepeatMs?: number;
 };
 
@@ -61,6 +61,8 @@ export class SetRunner {
   private res: SetResult | null = null;
   /** 지금까지 본 가장 늦은 시각. 이보다 이른 tick·push는 무시한다 */
   private lastT = -Infinity;
+  /** 마지막으로 push된 프레임 시각. 일시정지만큼 뒤로 민다 */
+  private lastFrameT = -Infinity;
   private pausedAt: number | null = null;
   /** 진단별 마지막 hint 시각 */
   private readonly hintAt = new Map<Diagnosis, number>();
@@ -114,6 +116,7 @@ export class SetRunner {
     const ph = this.phase; // advance가 단계를 바꿨을 수 있다
     if (ph === 'finished') return out;
     this.lastT = f.t;
+    this.lastFrameT = f.t;
 
     if (ph === 'countdown') {
       // 카운트다운 중에도 트래커는 계속 돌린다(자세가 깨져도 진행, 반복은 start 기준점으로 걸러짐).
@@ -132,6 +135,11 @@ export class SetRunner {
     const out: SetEvent[] = [];
     this.advance(t, out);
     this.lastT = Math.max(this.lastT, t);
+    // 매달리기 중 프레임이 끊겼다: HoldTimer는 프레임이 와야 grace를 재므로 여기서 같은 규칙으로 끝낸다.
+    // heldMs는 HoldTimer가 마지막 holding 프레임(또는 자세가 깨진 시각)에서 멈춰 둔 값 그대로다.
+    if (this.ph === 'active' && this.def.kind === 'hold' && t - this.lastFrameT >= this.def.hold.graceMs) {
+      this.finish(t, 'released', out);
+    }
     return out;
   }
 
@@ -147,6 +155,7 @@ export class SetRunner {
     if (this.ph === 'finished') return;
     this.countdownT0 += d;
     this.idleFrom += d;
+    this.lastFrameT += d;
     if (this.ph === 'active') this.pausedInActiveMs += d;
     // 일시정지 전의 시작 자세는 이어 보지 않는다.
     this.poseSince = null;
@@ -282,7 +291,8 @@ export class SetRunner {
   private hint(t: number, d: Diagnosis, out: SetEvent[]): void {
     if (d === 'ok') return;
     const last = this.hintAt.get(d);
-    if (last !== undefined && t - last < this.hintRepeatMs) return;
+    // 기본값 보정 안내는 세트당 한 번(운동 중 반복되면 방해). 나머지는 hintRepeatMs 간격으로 다시 낸다.
+    if (last !== undefined && (d === 'calibratedByDefault' || t - last < this.hintRepeatMs)) return;
     this.hintAt.set(d, t);
     out.push({ type: 'hint', diagnosis: d });
   }
