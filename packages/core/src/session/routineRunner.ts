@@ -134,6 +134,7 @@ export class RoutineRunner {
    * 지금 운동의 남은 세트를 건너뛰고 그다음 운동의 첫 세트(waitingReady)로 간다. 쉬는 시간은 두지 않는다.
    * 세트 중이면 반복이 있을 때만(count>0 또는 heldMs>0) 그만하기로 끝내 기록한다.
    * 쉬는 시간 중이면 restEnd를 내고 넘어간다. 다음 운동이 없으면 routineEnd(completed false).
+   * 일시정지 중이면 일시정지를 풀고 진행한다.
    */
   skipExercise(t: number): RoutineEvent[] {
     if (this.ph === 'done') return [];
@@ -145,10 +146,30 @@ export class RoutineRunner {
       this.rest = null;
       out.push({ type: 'restEnd' });
     }
+    // 일시정지 중이면 풀고 진행한다(새 세트는 멈추지 않은 상태로 시작).
+    this.pausedAt = null;
     this.lastT = now;
     const j = this.nextExercise(this.pos.exerciseIndex);
     if (j === null) this.end(now, out);
-    else this.startSet({ exerciseIndex: j, setIndex: 0 }, now, out);
+    else this.startSet({ exerciseIndex: j, setIndex: 0 }, out);
+    return out;
+  }
+
+  /**
+   * 쉬는 시간을 바로 끝내고 다음 세트(waitingReady)로 간다. 쉬는 시간이 끝났을 때와 같은 경로라
+   * restEnd 뒤 운동이 바뀌면 exerciseStart를 낸다. completed에는 영향이 없다. 쉬는 시간이 아니면 [].
+   * 일시정지 중이면 일시정지를 풀고 진행한다.
+   */
+  skipRest(t: number): RoutineEvent[] {
+    if (this.ph !== 'rest' || !this.rest) return [];
+    const out = this.takePending();
+    const now = Math.max(t, this.lastT);
+    this.pausedAt = null;
+    this.lastT = now;
+    const next = this.rest.next;
+    this.rest = null;
+    out.push({ type: 'restEnd' });
+    this.startSet(next, out);
     return out;
   }
 
@@ -241,7 +262,7 @@ export class RoutineRunner {
     // 같은 운동이면 그 운동의, 다음 운동이면 다음 운동의 restSec(둘 다 next 운동의 restSec)
     const restSec = this.routine.exercises[next.exerciseIndex]!.restSec;
     if (!(restSec > 0)) {
-      this.startSet(next, t, out);
+      this.startSet(next, out);
       return;
     }
     const ms = restSec * 1000;
@@ -257,7 +278,7 @@ export class RoutineRunner {
     if (remaining <= 0) {
       this.rest = null;
       out.push({ type: 'restEnd' });
-      this.startSet(r.next, t, out);
+      this.startSet(r.next, out);
       return;
     }
     // 정수 초(올림)마다 최대 한 번, 10의 배수와 5·4·3·2·1만. 건너뛴 값은 몰아서 내지 않는다.
@@ -278,12 +299,10 @@ export class RoutineRunner {
   }
 
   /** 다음 세트를 waitingReady로 시작한다. 운동이 바뀌면 exerciseStart */
-  private startSet(p: Pos, t: number, out: RoutineEvent[]): void {
+  private startSet(p: Pos, out: RoutineEvent[]): void {
     const changed = p.exerciseIndex !== this.pos.exerciseIndex;
     this.pos = { ...p };
     this.runner = this.makeRunner(p);
-    // 일시정지 중에 넘어갔으면(일시정지 중 건너뛰기) 새 세트도 멈춘 채로 시작한다.
-    if (this.pausedAt !== null) this.runner.pause(Math.max(t, this.pausedAt));
     this.ph = 'set';
     if (changed) out.push(this.exerciseStart(p.exerciseIndex));
   }
