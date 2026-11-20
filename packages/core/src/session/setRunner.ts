@@ -82,8 +82,15 @@ export class SetRunner {
   private idleFrom = 0;
   private holdSecs = 0;
   private goalSent = false;
-  /** active 중 일시정지한 시간 합. HoldTimer는 일시정지를 모르므로 heldMs에서 뺀다 */
-  private pausedInActiveMs = 0;
+  /**
+   * 매달리기: HoldTimer는 일시정지를 모르므로, resume 뒤 holding 프레임이 와서 lastTrueT가 일시정지 구간을
+   * 건너 밀리면 그만큼 heldMs가 부풀어 오른다. 그 경우에만 일시정지 시간을 뺀다.
+   * pendingPauseMs: 아직 heldMs에 반영됐는지 모르는 일시정지 시간, rawAtResume: 그때의 HoldTimer 값
+   */
+  private pendingPauseMs = 0;
+  private rawAtResume = 0;
+  /** 실제로 HoldTimer 값에 들어가 있어 빼야 하는 일시정지 시간 합 */
+  private pausedHoldMs = 0;
 
   constructor(cfg: SetConfig) {
     this.def = EXERCISES[cfg.exercise];
@@ -104,8 +111,13 @@ export class SetRunner {
     return this.tr.state();
   }
 
+  /** 세트 결과의 복사본(끝나기 전이나 시작 전 그만하기면 null) */
   get result(): SetResult | null {
-    return this.res;
+    return this.res ? copyResult(this.res) : null;
+  }
+
+  get paused(): boolean {
+    return this.pausedAt !== null;
   }
 
   push(f: PoseFrame): SetEvent[] {
@@ -156,7 +168,19 @@ export class SetRunner {
     this.countdownT0 += d;
     this.idleFrom += d;
     this.lastFrameT += d;
-    if (this.ph === 'active') this.pausedInActiveMs += d;
+    if (this.ph === 'waitingReady') {
+      // 보정·시작 자세 판정을 처음부터 다시 한다. 일시정지 시간 때문에 보정이 타임아웃되어 기본값으로
+      // 잡히거나, HoldTimer가 일시정지 전 시각부터 매달린 것으로 보는 일을 막는다.
+      this.tr = createTracker(this.cfg.exercise);
+    } else if (this.ph === 'active') {
+      // active 중에는 트래커를 그대로 둔다(세던 반복·버틴 시간을 이어 간다). 그래서 반복 도중 일시정지했다가
+      // resume 뒤 이어서 움직이면 그 반복이 확정될 수 있다.
+      const s = this.tr.state();
+      if (s.kind === 'hold') {
+        if (this.pendingPauseMs === 0) this.rawAtResume = s.heldMs;
+        this.pendingPauseMs += d;
+      }
+    }
     // 일시정지 전의 시작 자세는 이어 보지 않는다.
     this.poseSince = null;
     this.lastT = Math.max(this.lastT, t);
@@ -164,15 +188,21 @@ export class SetRunner {
 
   stop(t: number): SetEvent[] {
     if (this.ph === 'finished') return [];
-    if (this.ph !== 'active') {
+    // 지금까지 본 시각보다 이른 stop은 그 시각으로 본다. 일시정지 중이면 시간은 일시정지한 순간에 멈춰 있다.
+    const now = Math.max(t, this.lastT);
+    const ref = this.pausedAt !== null ? Math.max(Math.min(t, this.pausedAt), this.lastT) : now;
+    // 밀린 시간 처리를 먼저 끝낸다: idle이 이미 지났으면 idle로 끝나고, 카운트다운이 끝났으면 start한다.
+    const out: SetEvent[] = [];
+    this.advance(ref, out);
+    if (this.phase === 'finished') return out;
+    if (this.phase !== 'active') {
       // 아직 세트가 시작되지 않았다: 기록할 결과가 없다.
       this.ph = 'finished';
       return [];
     }
     // 그만하기를 누르려고 움직이다 잘못 센 반복을 되돌린다(#1).
-    this.reps = this.reps.filter((r) => !(r.endT > t - this.undoMs));
-    const out: SetEvent[] = [];
-    this.finish(t, 'manual', out);
+    this.reps = this.reps.filter((r) => !(r.endT > ref - this.undoMs));
+    this.finish(now, 'manual', out);
     return out;
   }
 
@@ -183,8 +213,11 @@ export class SetRunner {
     if (this.ph === 'countdown') {
       while (this.countdownNext < COUNTDOWN_NS.length) {
         const n = COUNTDOWN_NS[this.countdownNext]!;
-        if (t < this.countdownAt(n)) break;
-        out.push({ type: 'countdown', n });
+        // countdownMs 안에 들어가는 숫자만 낸다(1500이면 1만, 0이면 없음).
+        if (n * 1000 <= this.countdownMs) {
+          if (t < this.countdownAt(n)) break;
+          out.push({ type: 'countdown', n });
+        }
         this.countdownNext += 1;
       }
       if (t >= this.countdownT0 + this.countdownMs) this.begin(t, out);
@@ -193,15 +226,16 @@ export class SetRunner {
     if (this.ph !== 'active' || this.def.kind !== 'reps') return;
     if (this.reps.length > 0) {
       if (t - this.idleFrom >= this.idleEndMs) this.finish(t, 'idle', out);
-    } else if (t - this.idleFrom >= this.noStartMs) {
+    } else if (this.def.start !== 'visible' && t - this.idleFrom >= this.noStartMs) {
+      // 'visible'(네거티브)은 보이면 바로 다시 시작하므로, 되돌리면 "다시 자세를" → "시작"이 20초마다 반복된다.
       out.push({ type: 'backToReady' });
       this.toWaitingReady();
     }
   }
 
-  /** n을 낼 시각. 3000ms면 3·2·1이 0·1000·2000ms. 짧으면 앞의 숫자는 들어가는 순간 함께 낸다 */
+  /** n을 낼 시각(n*1000 <= countdownMs인 n만). 3000ms면 3·2·1이 0·1000·2000ms, start는 3000ms */
   private countdownAt(n: number): number {
-    return this.countdownT0 + Math.max(0, this.countdownMs - n * 1000);
+    return this.countdownT0 + this.countdownMs - n * 1000;
   }
 
   private checkReady(f: PoseFrame, s: TrackerState, out: SetEvent[]): void {
@@ -252,7 +286,9 @@ export class SetRunner {
     this.reps = [];
     this.holdSecs = 0;
     this.goalSent = false;
-    this.pausedInActiveMs = 0;
+    this.pendingPauseMs = 0;
+    this.rawAtResume = 0;
+    this.pausedHoldMs = 0;
     out.push({ type: 'start' });
   }
 
@@ -271,6 +307,11 @@ export class SetRunner {
       }
       return;
     }
+    if (this.pendingPauseMs > 0 && s.heldMs > this.rawAtResume) {
+      // resume 뒤 holding 프레임으로 HoldTimer 값이 일시정지 구간을 건너 늘었다(증가분 >= 일시정지 시간).
+      this.pausedHoldMs += this.pendingPauseMs;
+      this.pendingPauseMs = 0;
+    }
     const held = this.heldMs(s.heldMs);
     const secs = Math.floor(held / 1000);
     while (this.holdSecs < secs) {
@@ -285,7 +326,7 @@ export class SetRunner {
   }
 
   private heldMs(raw: number): number {
-    return Math.max(0, raw - this.pausedInActiveMs);
+    return Math.max(0, raw - this.pausedHoldMs);
   }
 
   private hint(t: number, d: Diagnosis, out: SetEvent[]): void {
@@ -310,7 +351,7 @@ export class SetRunner {
       endReason: reason,
     };
     this.ph = 'finished';
-    out.push({ type: 'finished', reason, result: this.res });
+    out.push({ type: 'finished', reason, result: copyResult(this.res) });
   }
 
   /** 첫 반복 없이 시간이 지났다: 트래커를 새로 만들고 준비 자세부터 다시 */
@@ -321,4 +362,8 @@ export class SetRunner {
     this.reps = [];
     this.prevRep = null;
   }
+}
+
+function copyResult(r: SetResult): SetResult {
+  return { ...r, target: { ...r.target }, negativeDescentMs: [...r.negativeDescentMs] };
 }

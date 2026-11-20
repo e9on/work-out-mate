@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, test } from 'vitest';
 import { SetRunner, type SetConfig, type SetEvent } from '../src/session/setRunner';
-import { EXERCISES, type ExerciseId } from '../src/exercises/runner';
+import { EXERCISES, replay, type ExerciseId } from '../src/exercises/runner';
 import type { RecordingFile } from '../src/recording';
 import type { PoseFrame } from '../src/types';
 import { LM } from '../src/types';
@@ -277,7 +277,8 @@ describe('SetRunner: 그만하기 stop', () => {
   it('negative: stop으로 뺀 반복은 negativeDescentMs에서도 뺀다', () => {
     const r = new SetRunner({ exercise: 'negative', target: { kind: 'reps', reps: 10 } });
     const c = new Clock();
-    const out = feed(r, c.frames([...hold(40, 500), ...reps(40, 170, 3, 90)], 'elbow'));
+    // 3번째 반복이 확정된 프레임까지만 넣는다(그 뒤 프레임이 있으면 stop이 lastT 기준이 된다).
+    const out = feed(r, c.frames([...hold(40, 500), ...reps(40, 170, 3, 90)], 'elbow'), [], (e) => e.type === 'rep' && e.count === 3);
     const lastRep = out.filter((x) => x.ev.type === 'rep').at(-1)!;
     // negative는 반환점에서 확정되므로 마지막 반복의 확정 시각 + 0.5초에 멈춘다.
     r.stop(lastRep.t + 500);
@@ -443,4 +444,250 @@ describe('SetRunner: 실녹화 (countdownMs 0)', () => {
       }
     });
   }
+});
+
+describe('SetRunner: 수정 1회차', () => {
+  const HANG = { wristAboveNose: true } as const;
+  const deadHang = () => new SetRunner({ exercise: 'deadHang', target: { kind: 'seconds', seconds: 60 } });
+  const holdsOf = (xs: Timed[]) => xs.flatMap((x) => (x.ev.type === 'hold' ? [x.ev.seconds] : []));
+  const heldNow = (r: SetRunner) => (r.tracker.kind === 'hold' ? r.tracker.heldMs : -1);
+
+  describe('매달리기 heldMs와 일시정지', () => {
+    it('매달린 채 pause 10초 → resume → 계속 매달림: 일시정지 시간이 빠진다', () => {
+      const r = deadHang();
+      const c = new Clock();
+      const out = feed(r, c.frames(hold(170, 3000), 'elbow', HANG));
+      const pauseT = c.t;
+      r.pause(pauseT);
+      r.resume(pauseT + 10000);
+      c.t = pauseT + 10000;
+      feed(r, c.frames(hold(170, 3000), 'elbow', HANG), out);
+      feed(r, c.frames(hold(170, 1500), 'elbow'), out);
+      const fin = finishedOf(out)!;
+      expect(fin.reason).toBe('released');
+      expect(Math.abs(fin.result.heldMs - 6000)).toBeLessThanOrEqual(100);
+      // 일시정지 10초가 끼어들어도 초는 건너뛰지 않는다(놓은 프레임까지 약 6006ms → 6).
+      expect(holdsOf(out)).toEqual([1, 2, 3, 4, 5, 6]);
+    });
+
+    it('8초 매달림 → pause 10초 → resume → 프레임 없이 tick으로 released: heldMs는 일시정지 전 값', () => {
+      const r = deadHang();
+      const c = new Clock();
+      feed(r, c.frames(hold(170, 8000), 'elbow', HANG));
+      const before = heldNow(r);
+      const pauseT = c.t;
+      r.pause(pauseT);
+      r.resume(pauseT + 10000);
+      const out = tickTo(r, pauseT + 10100, pauseT + 13000, 100);
+      const fin = finishedOf(out)!;
+      expect(fin.reason).toBe('released');
+      expect(fin.result.heldMs).toBe(before);
+      expect(Math.abs(fin.result.heldMs - 8000)).toBeLessThanOrEqual(100);
+    });
+
+    it('pause → resume 직후 stop: heldMs는 일시정지 전 값', () => {
+      const r = deadHang();
+      const c = new Clock();
+      feed(r, c.frames(hold(170, 4000), 'elbow', HANG));
+      const before = heldNow(r);
+      r.pause(c.t);
+      r.resume(c.t + 10000);
+      r.stop(c.t + 10000);
+      expect(r.result!.heldMs).toBe(before);
+    });
+
+    it('grace 중 일시정지: 손을 놓은 시점까지만 센다', () => {
+      const r = deadHang();
+      const c = new Clock();
+      feed(r, c.frames(hold(170, 4000), 'elbow', HANG));
+      const out = feed(r, c.frames(hold(170, 200), 'elbow'));
+      r.pause(c.t);
+      r.resume(c.t + 10000);
+      c.t += 10000;
+      feed(r, c.frames(hold(170, 1000), 'elbow'), out);
+      const fin = finishedOf(out)!;
+      expect(fin.reason).toBe('released');
+      expect(Math.abs(fin.result.heldMs - 4000)).toBeLessThanOrEqual(100);
+    });
+  });
+
+  it('start 뒤 pause 5초 → resume: backToReady가 5초 늦어진다', () => {
+    const r = squat();
+    const c = new Clock();
+    const out: Timed[] = [];
+    const startT = squatToActive(r, c, out);
+    r.pause(startT + 1000);
+    r.resume(startT + 6000);
+    tickTo(r, startT + 6000, startT + 26000, 10, out);
+    const back = first(out, 'backToReady')!;
+    expect(back).toBeDefined();
+    expect(back.t - startT).toBeGreaterThanOrEqual(25000);
+    expect(back.t - startT).toBeLessThan(25000 + 10);
+  });
+
+  describe('카운트다운 길이', () => {
+    it('countdownMs 0이면 start만 나온다', () => {
+      const r = squat(undefined, { countdownMs: 0 });
+      const out = feed(r, new Clock().frames(hold(175, 1000), 'knee'), [], (e) => e.type === 'start');
+      expect(types(out)).toEqual(['start']);
+      expect(r.phase).toBe('active');
+    });
+    it('countdownMs 1500이면 1(+500ms) → start(+1500ms). 2는 1500을 넘으므로 내지 않는다', () => {
+      const r = squat(undefined, { countdownMs: 1500 });
+      const out: Timed[] = [];
+      let entered = NaN;
+      for (const f of new Clock().frames(hold(175, 3500), 'knee')) {
+        for (const ev of r.push(f)) out.push({ t: f.t, ev });
+        if (Number.isNaN(entered) && r.phase !== 'waitingReady') entered = f.t;
+      }
+      expect(types(out)).toEqual(['countdown', 'start']);
+      expect(out[0]!.ev).toEqual({ type: 'countdown', n: 1 });
+      expect(Math.abs(out[0]!.t - entered - 500)).toBeLessThanOrEqual(40);
+      expect(Math.abs(out[1]!.t - entered - 1500)).toBeLessThanOrEqual(40);
+    });
+    it('countdownMs 2500이면 2 → 1(+1000) → start(+2000), 진입 순간에는 내지 않는다', () => {
+      const r = squat(undefined, { countdownMs: 2500 });
+      const out = feed(r, new Clock().frames(hold(175, 4000), 'knee'));
+      expect(types(out)).toEqual(['countdown', 'countdown', 'start']);
+      const [two, one, start] = out;
+      expect(two!.ev).toEqual({ type: 'countdown', n: 2 });
+      expect(one!.ev).toEqual({ type: 'countdown', n: 1 });
+      expect(Math.abs(one!.t - two!.t - 1000)).toBeLessThanOrEqual(40);
+      expect(Math.abs(start!.t - two!.t - 2000)).toBeLessThanOrEqual(40);
+    });
+  });
+
+  describe('stop 경계', () => {
+    function squatReps(k: number): { r: SetRunner; c: Clock; repTs: number[] } {
+      const r = squat();
+      const c = new Clock();
+      const out = feed(r, c.frames([...hold(175, 4200), ...reps(175, 90, k)], 'knee'));
+      return { r, c, repTs: out.filter((x) => x.ev.type === 'rep').map((x) => x.t) };
+    }
+    it('idle 시각이 이미 지난 stop은 idle로 끝난다(되돌림 없음)', () => {
+      const { r, repTs } = squatReps(2);
+      const evs = r.stop(repTs[1]! + 6000);
+      expect(evs).toHaveLength(1);
+      expect(evs[0]!.type === 'finished' && evs[0]!.reason).toBe('idle');
+      expect(r.result!.count).toBe(2);
+      expect(r.result!.endReason).toBe('idle');
+    });
+    it('카운트다운이 끝난 시각의 stop은 밀린 countdown·start 뒤 manual로 끝난다', () => {
+      const r = squat();
+      const c = new Clock();
+      const out = feed(r, c.frames(hold(175, 1000), 'knee'));
+      const t0 = first(out, 'countdown')!.t;
+      const evs = r.stop(t0 + 3500);
+      expect(evs.map((e) => e.type)).toEqual(['countdown', 'countdown', 'start', 'finished']);
+      expect(r.result!.endReason).toBe('manual');
+      expect(r.result!.count).toBe(0);
+    });
+    it('lastT보다 이른 stop은 lastT 기준으로 처리한다', () => {
+      const { r, c, repTs } = squatReps(5);
+      feed(r, c.frames(hold(175, 3000), 'knee'));
+      r.stop(repTs[4]! + 200);
+      expect(r.result!.count).toBe(5);
+      expect(r.result!.endT).toBe(c.t - DT);
+    });
+    it('일시정지 중 stop은 되돌림 기준이 pausedAt', () => {
+      const { r, repTs } = squatReps(5);
+      r.pause(repTs[4]! + 500);
+      const evs = r.stop(repTs[4]! + 4000);
+      expect(evs[0]!.type === 'finished' && evs[0]!.reason).toBe('manual');
+      expect(r.result!.count).toBe(4);
+    });
+    it('countdown 중 stop → 빈 배열, result null', () => {
+      const r = squat();
+      const c = new Clock();
+      feed(r, c.frames(hold(175, 1000), 'knee'));
+      expect(r.phase).toBe('countdown');
+      expect(r.stop(c.t)).toEqual([]);
+      expect(r.phase).toBe('finished');
+      expect(r.result).toBeNull();
+    });
+    it('stop으로 빠진 것은 마지막 반복: negativeDescentMs가 앞 두 반복의 outMs와 같다', () => {
+      const frames = new Clock().frames([...hold(40, 500), ...reps(40, 170, 3, 90)], 'elbow');
+      const all = replay('negative', frames).reps;
+      expect(all).toHaveLength(3);
+      const r = new SetRunner({ exercise: 'negative', target: { kind: 'reps', reps: 10 } });
+      feed(r, frames.filter((f) => f.t <= all[2]!.endT));
+      r.stop(all[2]!.endT + 500);
+      expect(r.result!.negativeDescentMs).toEqual(all.slice(0, 2).map((e) => e.outMs));
+    });
+  });
+
+  it('negativeDescentMs는 트래커 RepEvent의 outMs와 값이 같다', () => {
+    const frames = new Clock().frames([...hold(40, 500), ...reps(40, 170, 2, 90), ...hold(40, 9000)], 'elbow');
+    const r = new SetRunner({ exercise: 'negative', target: { kind: 'reps', reps: 10 } });
+    const out = feed(r, frames);
+    expect(finishedOf(out)!.result.negativeDescentMs).toEqual(replay('negative', frames).reps.map((e) => e.outMs));
+  });
+
+  it('waitingReady에서 resume하면 트래커를 새로 만든다(일시정지 시간으로 보정 타임아웃되지 않음)', () => {
+    const r = squat();
+    const c = new Clock();
+    feed(r, c.frames(hold(175, 300), 'knee'));
+    r.pause(c.t);
+    r.resume(c.t + 10000);
+    c.t += 10000;
+    feed(r, c.frames(hold(175, 300), 'knee'));
+    expect(r.tracker.kind === 'reps' && r.tracker.phase).toBe('calibrating');
+    feed(r, c.frames(hold(175, 1000), 'knee'));
+    expect(r.tracker.diagnosis).toBe('ok');
+  });
+
+  it('negative(visible)는 보이는 채로 25초 쉬어도 backToReady가 없다', () => {
+    const r = new SetRunner({ exercise: 'negative', target: { kind: 'reps', reps: 5 } });
+    const c = new Clock();
+    const out = feed(r, c.frames(hold(40, 25000), 'elbow'));
+    expect(types(out)).toEqual(['start']);
+    expect(r.phase).toBe('active');
+    expect(r.tick(c.t + 10000)).toEqual([]);
+  });
+
+  it('paused getter', () => {
+    const r = squat();
+    expect(r.paused).toBe(false);
+    r.pause(0);
+    expect(r.paused).toBe(true);
+    r.resume(100);
+    expect(r.paused).toBe(false);
+  });
+
+  it('finished 이벤트의 result와 runner.result는 서로 다른 복사본', () => {
+    const r = squat({ kind: 'reps', reps: 2 });
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 4200), ...reps(175, 90, 2)], 'knee'));
+    const fin = finishedOf(out)!;
+    expect(r.result).toEqual(fin.result);
+    expect(r.result).not.toBe(fin.result);
+    fin.result.count = 99;
+    fin.result.negativeDescentMs.push(1);
+    expect(r.result!.count).toBe(2);
+    expect(r.result!.negativeDescentMs).toEqual([]);
+  });
+
+  it('countdown 중에는 hint가 나오지 않는다', () => {
+    const r = squat();
+    const c = new Clock();
+    const out = feed(r, c.frames(hold(175, 1000), 'knee'));
+    expect(r.phase).toBe('countdown');
+    const hidden = [LM.L_HIP, LM.R_HIP, LM.L_KNEE, LM.R_KNEE, LM.L_ANKLE, LM.R_ANKLE];
+    const during = feed(r, c.frames(hold(175, 1500), 'knee', { hidden }));
+    expect(r.phase).toBe('countdown');
+    expect(types(during)).not.toContain('hint');
+    expect(types(out)).not.toContain('hint');
+  });
+
+  it('backToReady 뒤 다시 start하면 rep이 1부터 센다', () => {
+    const r = squat();
+    const c = new Clock();
+    const out: Timed[] = [];
+    squatToActive(r, c, out);
+    feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
+    expect(first(out, 'backToReady')).toBeDefined();
+    const after = feed(r, c.frames([...hold(175, 4200), ...oneRep(175, 90)], 'knee'));
+    expect(types(after).filter((t) => t === 'start')).toHaveLength(1);
+    expect(repCounts(after)).toEqual([1]);
+  });
 });

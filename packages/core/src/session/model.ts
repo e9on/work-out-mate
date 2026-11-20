@@ -5,10 +5,10 @@ export type Target = { kind: 'reps'; reps: number } | { kind: 'seconds'; seconds
 
 /**
  * 세트가 끝난 이유.
- * target 목표 도달 / idle 마지막 반복 뒤 반복 없음 / manual 그만하기 / released 매달리기에서 손을 놓음 /
- * noStart 시작 뒤 첫 반복 없음(SetRunner는 이때 끝내지 않고 준비 자세 대기로 돌아간다. 루틴 쪽에서 쓸 값)
+ * target 목표 도달 / idle 마지막 반복 뒤 반복 없음 / manual 그만하기 / released 매달리기에서 손을 놓음.
+ * 시작 뒤 첫 반복이 없으면 세트를 끝내지 않고 준비 자세 대기로 돌아가므로(backToReady) 종료 사유가 아니다.
  */
-export type EndReason = 'target' | 'idle' | 'manual' | 'released' | 'noStart';
+export type EndReason = 'target' | 'idle' | 'manual' | 'released';
 
 /** 세트 기록. 시각(startT·endT)은 프레임 시계(PoseFrame.t)와 같은 ms 단위다. */
 export type SetResult = {
