@@ -11,11 +11,18 @@ export type { HoldConfig } from './counter/holdTimer';
 export { EXERCISES, createTracker, replay } from './exercises/runner';
 export type {
   ExerciseId,
+  StartMode,
   ExerciseDef,
   RepExerciseDef,
   FixedRepExerciseDef,
   AdaptiveRepExerciseDef,
   HoldExerciseDef,
   TrackerState,
+  RepTrackerState,
+  HoldTrackerState,
+  Diagnosis,
+  Tracker,
+  ReplayResult,
+  StateFor,
 } from './exercises/runner';
 export type { RecordingFile } from './recording';

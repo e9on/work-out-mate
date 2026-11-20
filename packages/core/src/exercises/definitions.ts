@@ -8,23 +8,34 @@ import type { HoldConfig } from '../counter/holdTimer';
 
 export type ExerciseId = 'squat' | 'pushup' | 'dumbbellBench' | 'pullup' | 'negative' | 'deadHang';
 
-type RepExerciseBase = {
+/** 시작 방식: 'calibrate' 준비 자세 보정 / 'pose' 시작 자세를 잡으면 시작 / 'visible' 몸이 보이면 바로 시작 */
+export type StartMode = 'calibrate' | 'pose' | 'visible';
+
+type ExerciseCommon = {
+  start: StartMode;
+  /** 시작한 뒤 이 시간(ms) 동안 아무 진행이 없으면 세션을 끝낸다 */
+  idleEndMs: number;
+  /** start === 'pose'일 때 시작 자세인지. 판단할 관절이 안 보이면 null */
+  startPose?(f: PoseFrame): boolean | null;
+};
+
+type RepExerciseBase = ExerciseCommon & {
   id: Exclude<ExerciseId, 'deadHang'>;
   kind: 'reps';
   signal(f: PoseFrame): number | null;
 };
 /** 고정 임계값 카운터(RepCounter)를 쓰는 운동 */
-export type FixedRepExerciseDef = RepExerciseBase & { rep: RepConfig; adaptive?: never; ready?: never };
+export type FixedRepExerciseDef = RepExerciseBase & { mode: 'fixed'; rep: RepConfig };
 /** 준비 자세 기준 카운터(AdaptiveRepCounter)를 쓰는 운동 */
 export type AdaptiveRepExerciseDef = RepExerciseBase & {
+  mode: 'adaptive';
   adaptive: AdaptiveConfig;
   /** 이 프레임이 준비 자세인지(보정 중에만 쓴다). 판단할 관절이 안 보이면 null */
   ready(f: PoseFrame): boolean | null;
-  rep?: never;
 };
-/** `def.adaptive`가 있으면 준비 자세 기준, 없으면 `def.rep` 고정 임계값. */
+/** `mode`가 'adaptive'면 준비 자세 기준, 'fixed'면 `rep` 고정 임계값. */
 export type RepExerciseDef = FixedRepExerciseDef | AdaptiveRepExerciseDef;
-export type HoldExerciseDef = {
+export type HoldExerciseDef = ExerciseCommon & {
   id: 'deadHang';
   kind: 'hold';
   holding(f: PoseFrame): boolean | null;
@@ -155,12 +166,32 @@ function deadHangHolding(f: PoseFrame): boolean | null {
   return wristsUp && l >= DEAD_HANG_MIN_ELBOW && r >= DEAD_HANG_MIN_ELBOW;
 }
 
-export const EXERCISES: Record<ExerciseId, ExerciseDef> = {
-  squat: { id: 'squat', kind: 'reps', signal: (f) => betterSideAngle(f, L_LEG, R_LEG), ready: uprightReady, adaptive: ADAPTIVE_CFG.squat },
-  pushup: { id: 'pushup', kind: 'reps', signal: armAngle, ready: lyingReady, adaptive: ADAPTIVE_CFG.pushup },
-  dumbbellBench: { id: 'dumbbellBench', kind: 'reps', signal: meanVisibleArms, ready: lyingReady, adaptive: ADAPTIVE_CFG.dumbbellBench },
+const IDLE_END_MS = 5000;
+
+export const EXERCISES = {
+  squat: {
+    id: 'squat', kind: 'reps', mode: 'adaptive', start: 'calibrate', idleEndMs: IDLE_END_MS,
+    signal: (f) => betterSideAngle(f, L_LEG, R_LEG), ready: uprightReady, adaptive: ADAPTIVE_CFG.squat,
+  },
+  pushup: {
+    id: 'pushup', kind: 'reps', mode: 'adaptive', start: 'calibrate', idleEndMs: IDLE_END_MS,
+    signal: armAngle, ready: lyingReady, adaptive: ADAPTIVE_CFG.pushup,
+  },
+  dumbbellBench: {
+    id: 'dumbbellBench', kind: 'reps', mode: 'adaptive', start: 'calibrate', idleEndMs: IDLE_END_MS,
+    signal: meanVisibleArms, ready: lyingReady, adaptive: ADAPTIVE_CFG.dumbbellBench,
+  },
   // 사용자 결정: 턱걸이는 팔꿈치 각도로만 판별한다(코·손목·철봉 위치는 보지 않음).
-  pullup: { id: 'pullup', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.pullup },
-  negative: { id: 'negative', kind: 'reps', signal: meanVisibleArms, rep: REP_CFG.negative },
-  deadHang: { id: 'deadHang', kind: 'hold', holding: deadHangHolding, hold: HOLD_CFG },
-};
+  pullup: {
+    id: 'pullup', kind: 'reps', mode: 'fixed', start: 'pose', idleEndMs: IDLE_END_MS,
+    signal: meanVisibleArms, startPose: deadHangHolding, rep: REP_CFG.pullup,
+  },
+  negative: {
+    id: 'negative', kind: 'reps', mode: 'fixed', start: 'visible', idleEndMs: 8000,
+    signal: meanVisibleArms, rep: REP_CFG.negative,
+  },
+  deadHang: {
+    id: 'deadHang', kind: 'hold', start: 'pose', idleEndMs: IDLE_END_MS,
+    holding: deadHangHolding, hold: HOLD_CFG,
+  },
+} satisfies Record<ExerciseId, ExerciseDef>;

@@ -30,4 +30,6 @@ if (!Object.hasOwn(EXERCISES, id)) {
 }
 
 const r = replay(id as ExerciseId, rec.frames);
-console.log(JSON.stringify({ exercise: id, count: r.count, heldMs: r.heldMs, reps: r.reps }));
+// 기존 키(count, heldMs, reps)는 유지한다. 해당 없는 쪽은 0.
+const out = { exercise: id, kind: r.kind, count: r.kind === 'reps' ? r.count : 0, heldMs: r.kind === 'hold' ? r.heldMs : 0, reps: r.reps, diagnosis: r.diagnosis };
+console.log(JSON.stringify(out));

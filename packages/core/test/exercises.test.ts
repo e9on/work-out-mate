@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { EXERCISES, createTracker, replay } from '../src/exercises/runner';
-import type { ExerciseId } from '../src/exercises/definitions';
 import { LM } from '../src/types';
+import type { TrackerState } from '../src/exercises/runner';
 import { buildPose, series } from './helpers/poseBuilder';
+
+/** 준비 자세 보정 중인지(reps 상태의 phase) */
+const isCal = (s: TrackerState) => s.kind === 'reps' && s.phase === 'calibrating';
 
 /** a에서 b로 n프레임 선형 변화(끝점 제외) */
 function lin(a: number, b: number, n: number): number[] {
@@ -70,19 +73,19 @@ describe('dumbbellBench', () => {
     const frames = series([...ready(170), ...oneRep(170, 85)], 'elbow', 33, { ...FLAT, hidden: [LM.L_ELBOW, LM.L_WRIST] });
     const r = replay('dumbbellBench', frames);
     expect(r.count).toBe(1);
-    expect(r.paused).toBe(false);
+    expect(r.diagnosis).not.toBe('notVisible');
   });
   it('한쪽 팔(13,15)만 hidden이어도 마찬가지', () => {
     const frames = series([...ready(170), ...oneRep(170, 85)], 'elbow', 33, { ...FLAT, hidden: [13, 15] });
     const r = replay('dumbbellBench', frames);
     expect(r.count).toBe(1);
-    expect(r.paused).toBe(false);
+    expect(r.diagnosis).not.toBe('notVisible');
   });
   it('양팔이 모두 hidden이면 count 0, paused', () => {
     const frames = series(oneRep(170, 85), 'elbow', 33, { hidden: [13, 15, 14, 16] });
     const r = replay('dumbbellBench', frames);
     expect(r.count).toBe(0);
-    expect(r.paused).toBe(true);
+    expect(r.diagnosis).toBe('notVisible');
   });
 });
 
@@ -106,7 +109,7 @@ describe('deadHang', () => {
     );
     const r = replay('deadHang', frames);
     expect(Math.abs(r.heldMs - 5000)).toBeLessThanOrEqual(100);
-    expect(r.count).toBe(0);
+    expect(r.reps).toHaveLength(0);
   });
   it('손목이 코 아래면 시간이 올라가지 않는다', () => {
     const frames = Array.from({ length: 60 }, (_, i) => buildPose({ t: i * 33, elbow: 170 }));
@@ -122,12 +125,12 @@ describe('deadHang', () => {
     const frames = Array.from({ length: 10 }, (_, i) =>
       buildPose({ t: i * 33, elbow: 170, wristAboveNose: true, hidden: [LM.NOSE] }),
     );
-    expect(replay('deadHang', frames).paused).toBe(true);
+    expect(replay('deadHang', frames).diagnosis).toBe('notVisible');
   });
 });
 
 describe('createTracker와 replay', () => {
-  const cases: Array<[ExerciseId, ReturnType<typeof series>]> = [
+  const cases: Array<['squat' | 'pushup' | 'negative', ReturnType<typeof series>]> = [
     ['squat', series([...ready(175), ...oneRep(175, 90)], 'knee')],
     ['pushup', series([...ready(170), ...oneRep(170, 85)], 'elbow', 33, FLAT)],
     ['negative', series(oneRep(40, 170, 90), 'elbow')],
@@ -213,9 +216,9 @@ describe('pullup·negative 신호는 양팔 팔꿈치 각도 평균', () => {
     return a;
   }
   const uniform = (id: 'pullup' | 'negative', deg: number) =>
-    EXERCISES[id].kind === 'reps' ? (EXERCISES[id] as { signal(f: unknown): number | null }).signal(buildPose({ t: 0, elbow: deg })) : null;
+    EXERCISES[id].signal(buildPose({ t: 0, elbow: deg }));
   const sig = (id: 'pullup' | 'negative', f: ReturnType<typeof buildPose>) =>
-    (EXERCISES[id] as { signal(f: unknown): number | null }).signal(f);
+    EXERCISES[id].signal(f);
 
   it.each(['pullup', 'negative'] as const)('%s: 왼팔 120, 오른팔 160이면 평균', (id) => {
     const expected = (uniform(id, 120)! + uniform(id, 160)!) / 2;
@@ -253,19 +256,19 @@ describe('negative: 바닥에 닿는 즉시 센다', () => {
   });
 });
 
-describe('준비 자세 보정 상태(TrackerState.calibrating)', () => {
+describe('준비 자세 보정 상태(phase === calibrating)', () => {
   it.each(['squat', 'pushup', 'dumbbellBench'] as const)('%s: 처음엔 calibrating, 1초 정지 뒤 false', (id) => {
     const key = id === 'squat' ? 'knee' : 'elbow';
     const tr = createTracker(id);
     const frames = series(ready(170), key, 33, id === 'squat' ? {} : FLAT);
-    expect(tr.push(frames[0]!).calibrating).toBe(true);
+    expect(isCal(tr.push(frames[0]!))).toBe(true);
     let last = tr.state();
     for (const f of frames.slice(1)) last = tr.push(f);
-    expect(last.calibrating).toBe(false);
+    expect(isCal(last)).toBe(false);
   });
   it.each(['pullup', 'negative', 'deadHang'] as const)('%s: 보정 없음(항상 false)', (id) => {
     const tr = createTracker(id);
-    expect(tr.push(buildPose({ t: 0, elbow: 170 })).calibrating).toBe(false);
+    expect(isCal(tr.push(buildPose({ t: 0, elbow: 170 })))).toBe(false);
   });
 });
 
@@ -276,7 +279,7 @@ describe('수정 1회차: 준비 자세 확인(몸통 방향)', () => {
     const tr = createTracker('pushup');
     let s = tr.state();
     for (const f of series(ready(170), 'elbow')) s = tr.push(f);
-    expect(s.calibrating).toBe(true);
+    expect(isCal(s)).toBe(true);
     expect(s.baseline).toBeNull();
   });
 
@@ -285,7 +288,7 @@ describe('수정 1회차: 준비 자세 확인(몸통 방향)', () => {
     const t0 = standing[standing.length - 1]!.t + 33;
     const v = [...ready(168), ...oneRep(155, 115), ...oneRep(155, 115), ...oneRep(155, 115)];
     const r = replay('pushup', [...standing, ...at(series(v, 'elbow', 33, FLAT), t0)]);
-    expect(r.calibrating).toBe(false);
+    expect(isCal(r)).toBe(false);
     expect(r.baseline).toBeCloseTo(168, 0);
     expect(r.count).toBe(3);
   });
@@ -301,7 +304,7 @@ describe('수정 1회차: 준비 자세 확인(몸통 방향)', () => {
     const tr = createTracker('squat');
     let s = tr.state();
     for (const f of series(ready(175), 'knee', 33, FLAT)) s = tr.push(f);
-    expect(s.calibrating).toBe(true);
+    expect(isCal(s)).toBe(true);
     expect(s.baseline).toBeNull();
   });
 
@@ -309,15 +312,15 @@ describe('수정 1회차: 준비 자세 확인(몸통 방향)', () => {
     const a = createTracker('dumbbellBench');
     let s = a.state();
     for (const f of series(ready(170), 'elbow')) s = a.push(f);
-    expect(s.calibrating).toBe(true);
+    expect(isCal(s)).toBe(true);
     const b = createTracker('dumbbellBench');
     for (const f of series(ready(170), 'elbow', 33, FLAT)) s = b.push(f);
-    expect(s.calibrating).toBe(false);
+    expect(isCal(s)).toBe(false);
   });
 
   it('ready 함수: 어깨나 엉덩이가 안 보이면 null', () => {
     for (const id of ['squat', 'pushup', 'dumbbellBench'] as const) {
-      const def = EXERCISES[id] as unknown as { ready(f: unknown): boolean | null };
+      const def = EXERCISES[id];
       expect(def.ready(buildPose({ t: 0, hidden: [LM.L_SHOULDER, LM.R_SHOULDER] }))).toBeNull();
       expect(def.ready(buildPose({ t: 0, hidden: [LM.L_HIP, LM.R_HIP] }))).toBeNull();
     }
@@ -327,7 +330,7 @@ describe('수정 1회차: 준비 자세 확인(몸통 방향)', () => {
     const tr = createTracker('pushup');
     tr.push(buildPose({ t: 0, elbow: 170, torso: 'flat' }));
     const s = tr.push(buildPose({ t: 33, elbow: 170, torso: 'flat', hidden: [LM.L_ELBOW, LM.R_ELBOW] }));
-    expect(s.calibrating).toBe(true);
+    expect(isCal(s)).toBe(true);
   });
 });
 
@@ -346,7 +349,7 @@ describe('몸통 기울기는 world 좌표 기준(#3)', () => {
   }
   const deg = (d: number) => (d * Math.PI) / 180;
   const ready = (id: 'pushup' | 'squat' | 'dumbbellBench', f: Frame) =>
-    (EXERCISES[id] as unknown as { ready(f: Frame): boolean | null }).ready(f);
+    EXERCISES[id].ready(f);
   const HORIZ_S = { x: -0.25, y: 0, z: 0 }, HORIZ_H = { x: 0.25, y: 0, z: 0 };
 
   it('world는 수평인데 image는 세로로 서 있어도 lyingReady는 true', () => {
@@ -414,5 +417,72 @@ describe('몸통 기울기는 world 좌표 기준(#3)', () => {
     it('양쪽 다 보이면 중점', () => {
       expect(ready('squat', skewed([]))).toBe(true);
     });
+  });
+});
+
+describe('TrackerState 판별 유니온과 진단(#4, #2)', () => {
+  const allHidden = Array.from({ length: 33 }, (_, i) => i);
+
+  it('squat 트래커 상태는 kind가 reps', () => {
+    const s = createTracker('squat').push(buildPose({ t: 0, knee: 175 }));
+    expect(s.kind).toBe('reps');
+  });
+
+  it('deadHang 트래커 상태는 kind가 hold', () => {
+    const s = createTracker('deadHang').push(buildPose({ t: 0, elbow: 170, wristAboveNose: true }));
+    expect(s.kind).toBe('hold');
+  });
+
+  it('관절을 다 가리면 reps·hold 모두 notVisible', () => {
+    const hidden = buildPose({ t: 0, hidden: allHidden });
+    expect(createTracker('squat').push(hidden).diagnosis).toBe('notVisible');
+    expect(createTracker('pullup').push(hidden).diagnosis).toBe('notVisible');
+    expect(createTracker('deadHang').push(hidden).diagnosis).toBe('notVisible');
+  });
+
+  it('서 있는 자세의 pushup 보정 중에는 notReady', () => {
+    const tr = createTracker('pushup');
+    let s = tr.state();
+    for (const f of series(ready(170), 'elbow')) s = tr.push(f);
+    expect(s.diagnosis).toBe('notReady');
+  });
+
+  it('준비 자세로 보정되면 ok', () => {
+    const tr = createTracker('pushup');
+    let s = tr.state();
+    for (const f of series(ready(170), 'elbow', 33, FLAT)) s = tr.push(f);
+    expect(s.diagnosis).toBe('ok');
+  });
+
+  it('3초 타임아웃으로 보정되면 calibratedByDefault', () => {
+    const wobble = Array.from({ length: 140 }, (_, i) => (Math.floor(i / 6) % 2 === 0 ? 170 : 120));
+    const tr = createTracker('pushup');
+    let s = tr.state();
+    for (const f of series(wobble, 'elbow', 33, FLAT)) s = tr.push(f);
+    expect(s.kind === 'reps' && s.phase !== 'calibrating').toBe(true);
+    expect(s.diagnosis).toBe('calibratedByDefault');
+  });
+
+  it('보정 없는 운동은 보이면 ok', () => {
+    expect(createTracker('pullup').push(buildPose({ t: 0, elbow: 170 })).diagnosis).toBe('ok');
+  });
+
+  it('운동별 시작 방식과 idleEndMs', () => {
+    expect(EXERCISES.squat.start).toBe('calibrate');
+    expect(EXERCISES.pushup.start).toBe('calibrate');
+    expect(EXERCISES.dumbbellBench.start).toBe('calibrate');
+    expect(EXERCISES.pullup.start).toBe('pose');
+    expect(EXERCISES.pullup.startPose).toBeTypeOf('function');
+    expect(EXERCISES.deadHang.start).toBe('pose');
+    expect(EXERCISES.negative.start).toBe('visible');
+    expect(EXERCISES.negative.idleEndMs).toBe(8000);
+    for (const id of ['squat', 'pushup', 'dumbbellBench', 'pullup', 'deadHang'] as const) {
+      expect(EXERCISES[id].idleEndMs).toBe(5000);
+    }
+  });
+
+  it('mode 판별자: squat·pushup·dumbbellBench는 adaptive, pullup·negative는 fixed', () => {
+    for (const id of ['squat', 'pushup', 'dumbbellBench'] as const) expect(EXERCISES[id].mode).toBe('adaptive');
+    for (const id of ['pullup', 'negative'] as const) expect(EXERCISES[id].mode).toBe('fixed');
   });
 });

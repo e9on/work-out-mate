@@ -103,9 +103,10 @@ function updateDiag(frame: import('@wom/core').PoseFrame): void {
     return;
   }
   const s = def.signal(frame);
-  const restSide = def.adaptive ? def.adaptive.restSide : def.rep.restSide;
-  if (state.count !== diagCount) {
-    diagCount = state.count;
+  const restSide = def.mode === 'adaptive' ? def.adaptive.restSide : def.rep.restSide;
+  const count = state.kind === 'reps' ? state.count : 0;
+  if (count !== diagCount) {
+    diagCount = count;
     diagExtreme = null;
   }
   if (s !== null) {
@@ -113,10 +114,10 @@ function updateDiag(frame: import('@wom/core').PoseFrame): void {
     if (deeper) diagExtreme = s;
   }
   let rule: string;
-  if (def.adaptive) {
+  if (def.mode === 'adaptive') {
     // 준비 자세 기준: 바닥 = 기준 - depth, 복귀 = 이번 최저 + rebound ('low'면 방향만 반대)
     const a = def.adaptive;
-    const b = state.baseline;
+    const b = state.kind === 'reps' ? state.baseline : null;
     const dir = a.restSide === 'high' ? 1 : -1;
     rule =
       b === null
@@ -137,7 +138,6 @@ function refreshHud(): void {
   while (doneTimes.length && now - doneTimes[0]! > 1000) doneTimes.shift();
   hud.render({
     state,
-    kind: EXERCISES[exerciseSel.value as ExerciseId].kind,
     fps: doneTimes.length,
     avgMs: inferMs.avg(),
     p95Ms: inferMs.p95(),
