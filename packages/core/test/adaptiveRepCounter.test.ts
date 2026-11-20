@@ -368,11 +368,28 @@ describe('보정 출처(calibrationSource)와 타임아웃 관측 최고점', ()
     expect(c.calibrationSource).toBe('observed');
   });
 
-  it('유효 신호가 하나도 없으면 타임아웃 자체가 안 나서 보정되지 않는다(default는 관측값이 없을 때의 방어 경로)', () => {
+  it('유효 신호가 하나도 없으면 타임아웃 자체가 안 나서 보정되지 않는다', () => {
     const c = new AdaptiveRepCounter(CFG);
     run(c, new Seq().hold(null, 4000).frames);
     expect(c.calibrated).toBe(false);
     expect(c.calibrationSource).toBeNull();
+  });
+
+  it('타임아웃 때 관측 최고점(120)이 minBaseline(140) 미만이면 defaultBaseline, default', () => {
+    const c = new AdaptiveRepCounter(CFG);
+    run(c, moving(120, 80, 3300).frames);
+    expect(c.calibrated).toBe(true);
+    expect(c.baseline).toBe(165);
+    expect(c.calibrationSource).toBe('default');
+  });
+
+  it('restSide low: 관측 최솟값(90)이 minBaseline(60)보다 크면 defaultBaseline, default', () => {
+    const c = new AdaptiveRepCounter({ ...CFG, restSide: 'low', defaultBaseline: 40, minBaseline: 60 });
+    const s = new Seq();
+    while (s.t < 3300) s.ramp(90, 130, 300).ramp(130, 90, 300);
+    run(c, s.frames);
+    expect(c.baseline).toBe(40);
+    expect(c.calibrationSource).toBe('default');
   });
 
   it('유효 신호 한 번뿐인 채 3초 뒤 한 프레임 → 관측값이 있으니 observed(단일값)', () => {

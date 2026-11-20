@@ -201,8 +201,13 @@ export class AdaptiveRepCounter {
     }
     if (t - this.calibrateFromT >= calibrateTimeoutMs) {
       // 계속 움직여 못 잡았으면 본 것 중 rest 쪽 최고점을 쓴다(기본값보다 실제 자세에 가깝다).
-      if (this.obsBest !== null) this.finishCalibration(this.obsBest, s, 'observed');
-      else this.finishCalibration(this.sign * defaultBaseline, s, 'default');
+      // 단, 정상 보정처럼 minBaseline 이상이어야 한다(바닥 근처만 본 경우는 기본값).
+      // 주의: 최댓값이라 노이즈 한 프레임이 기준이 될 수 있다.
+      if (this.obsBest !== null && this.obsBest >= this.sign * minBaseline) {
+        this.finishCalibration(this.obsBest, s, 'observed');
+      } else {
+        this.finishCalibration(this.sign * defaultBaseline, s, 'default');
+      }
     }
   }
 
