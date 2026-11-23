@@ -689,9 +689,9 @@ describe('SetRunner: 수정 1회차', () => {
     squatToActive(r, c, out);
     feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
     expect(first(out, 'backToReady')).toBeDefined();
-    // 10.1(c): 준비 자세가 한 번 흐트러져야(여기서는 다리가 안 보이는 몇 프레임) 다시 시작한다.
+    // 10.1(c): 준비 자세가 한 번 흐트러져야(여기서는 다리가 안 보이는 400ms 이상) 다시 시작한다.
     const hidden = [LM.L_HIP, LM.R_HIP, LM.L_KNEE, LM.R_KNEE, LM.L_ANKLE, LM.R_ANKLE];
-    feed(r, c.frames(hold(175, 200), 'knee', { hidden }));
+    feed(r, c.frames(hold(175, 500), 'knee', { hidden }));
     const after = feed(r, c.frames([...hold(175, 4200), ...oneRep(175, 90)], 'knee'));
     expect(types(after).filter((t) => t === 'start')).toHaveLength(1);
     expect(repCounts(after)).toEqual([1]);
@@ -827,9 +827,9 @@ describe('SetRunner: 2b 보강 (spec 10 (a)(b)(c))', () => {
       expect(types(stand)).not.toContain('start');
       expect(types(stand)).not.toContain('backToReady');
       expect(r.phase).toBe('waitingReady');
-      // 신호 null 몇 프레임(흐트러짐) → 다시 준비 자세
+      // 신호 null 400ms 이상(흐트러짐) → 다시 준비 자세
       c.t += 2000;
-      const again = feed(r, c.frames(hold(175, 200), 'knee', { hidden: HIDDEN_LEGS }));
+      const again = feed(r, c.frames(hold(175, 500), 'knee', { hidden: HIDDEN_LEGS }));
       feed(r, c.frames(hold(175, 4500), 'knee'), again);
       expect(types(again).filter((t) => t !== 'hint')).toEqual(['countdown', 'countdown', 'countdown', 'start']);
       expect(r.phase).toBe('active');
@@ -843,12 +843,12 @@ describe('SetRunner: 2b 보강 (spec 10 (a)(b)(c))', () => {
       feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
       const stand = feed(r, c.frames(hold(175, 10000), 'knee'));
       expect(types(stand)).not.toContain('start');
-      const again = feed(r, c.frames(hold(175, 100), 'knee', { torso: 'flat' }));
+      const again = feed(r, c.frames(hold(175, 500), 'knee', { torso: 'flat' }));
       feed(r, c.frames(hold(175, 4500), 'knee'), again);
       expect(types(again).filter((t) => t !== 'hint')).toEqual(['countdown', 'countdown', 'countdown', 'start']);
     });
 
-    it('pullup: 매달린 채 20초 → backToReady → 계속 매달림 → start 없음 → 내려왔다가 다시 매달림 300ms → start', () => {
+    it('pullup: 매달린 채 20초 → backToReady → 계속 매달림 → start 없음 → 400ms 이상 내려왔다가 다시 매달림 300ms → start', () => {
       const r = new SetRunner({ exercise: 'pullup', target: { kind: 'reps', reps: 5 } });
       const c = new Clock();
       const out = feed(r, c.frames(hold(170, 500), 'elbow', HANG), [], (e) => e.type === 'start');
@@ -860,7 +860,7 @@ describe('SetRunner: 2b 보강 (spec 10 (a)(b)(c))', () => {
       expect(types(still)).not.toContain('start');
       expect(types(still)).not.toContain('backToReady');
       expect(r.phase).toBe('waitingReady');
-      feed(r, c.frames(hold(170, 300), 'elbow'), still); // 내려옴(startPose false)
+      feed(r, c.frames(hold(170, 500), 'elbow'), still); // 내려옴(startPose false, 400ms 이상)
       const hangT = c.t;
       feed(r, c.frames(hold(170, 600), 'elbow', HANG), still);
       const s = first(still, 'start')!;
@@ -868,5 +868,105 @@ describe('SetRunner: 2b 보강 (spec 10 (a)(b)(c))', () => {
       expect(s.t - hangT).toBeGreaterThanOrEqual(300);
       expect(s.t - hangT).toBeLessThan(300 + 40);
     });
+  });
+});
+
+describe('SetRunner: 작업 1 수정 1회차 (흐트러짐 400ms·스쿼트 굽힘·ready null·waitingForBreak)', () => {
+  const HIDDEN_LEGS = [LM.L_HIP, LM.R_HIP, LM.L_KNEE, LM.R_KNEE, LM.L_ANKLE, LM.R_ANKLE];
+  const HIDDEN_SHOULDERS = [LM.L_SHOULDER, LM.R_SHOULDER];
+
+  /** squat: start → 20초 반복 없음 → backToReady. 시계는 backToReady 바로 뒤로 맞춘다 */
+  function squatBack(): { r: SetRunner; c: Clock } {
+    const r = squat();
+    const c = new Clock();
+    const out: Timed[] = [];
+    squatToActive(r, c, out);
+    feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
+    c.t = first(out, 'backToReady')!.t + DT;
+    return { r, c };
+  }
+  /** 첫 프레임 t0부터 마지막 프레임 t0+spanMs까지(DT 간격, 마지막은 정확히 t0+spanMs) 흐트러진 프레임 */
+  function brokenSpan(c: Clock, spanMs: number, opts: Extra = { hidden: HIDDEN_LEGS }, knee = 175): PoseFrame[] {
+    const t0 = c.t;
+    const ts: number[] = [];
+    for (let t = t0; t < t0 + spanMs; t += DT) ts.push(t);
+    ts.push(t0 + spanMs);
+    c.t = t0 + spanMs + DT;
+    return ts.map((t) => buildPose({ ...opts, t, knee }));
+  }
+  const standThenStarts = (r: SetRunner, c: Clock) => types(feed(r, c.frames(hold(175, 4500), 'knee'))).includes('start');
+
+  it('waitingForBreak: 처음 false, backToReady 뒤 서 있으면 true이고 시작 없음', () => {
+    expect(squat().waitingForBreak).toBe(false);
+    const { r, c } = squatBack();
+    expect(r.waitingForBreak).toBe(true);
+    expect(standThenStarts(r, c)).toBe(false);
+    expect(r.waitingForBreak).toBe(true);
+  });
+
+  it('1프레임 흐트러짐(visibility 깜빡임)으로는 다시 시작하지 않는다', () => {
+    const { r, c } = squatBack();
+    feed(r, c.frames([175], 'knee', { hidden: HIDDEN_LEGS }));
+    expect(standThenStarts(r, c)).toBe(false);
+    expect(r.waitingForBreak).toBe(true);
+  });
+
+  it('399ms 흐트러짐으로는 다시 시작하지 않는다', () => {
+    const { r, c } = squatBack();
+    feed(r, brokenSpan(c, 399));
+    expect(r.waitingForBreak).toBe(true);
+    expect(standThenStarts(r, c)).toBe(false);
+  });
+
+  it('400ms 흐트러짐 → 다시 준비 자세 → 보정 → countdown → start', () => {
+    const { r, c } = squatBack();
+    feed(r, brokenSpan(c, 400));
+    expect(r.waitingForBreak).toBe(false);
+    const again = feed(r, c.frames(hold(175, 4500), 'knee'));
+    expect(types(again).filter((t) => t !== 'hint')).toEqual(['countdown', 'countdown', 'countdown', 'start']);
+  });
+
+  it('흐트러짐 중간에 흐트러지지 않은 프레임이 하나 끼면 처음부터 다시 잰다', () => {
+    const { r, c } = squatBack();
+    feed(r, brokenSpan(c, 300));
+    feed(r, c.frames([175], 'knee'));
+    feed(r, brokenSpan(c, 300));
+    expect(r.waitingForBreak).toBe(true);
+  });
+
+  it('squat: 무릎 120°(minBaseline 150 미만)로 400ms 이상 → 흐트러짐 인정 → 다시 서서 보정 → start', () => {
+    const { r, c } = squatBack();
+    feed(r, c.frames(hold(120, 500), 'knee'));
+    expect(r.waitingForBreak).toBe(false);
+    const again = feed(r, c.frames(hold(175, 4500), 'knee'));
+    expect(types(again).filter((t) => t !== 'hint')).toEqual(['countdown', 'countdown', 'countdown', 'start']);
+  });
+
+  it('squat: 무릎 155°(minBaseline 이상)는 흐트러짐이 아니다', () => {
+    const { r, c } = squatBack();
+    feed(r, c.frames(hold(155, 1000), 'knee'));
+    expect(r.waitingForBreak).toBe(true);
+  });
+
+  it('ready null(어깨가 화면 밖, 다리는 보임)로 400ms 이상 → 흐트러짐 인정', () => {
+    const { r, c } = squatBack();
+    feed(r, c.frames(hold(175, 500), 'knee', { hidden: HIDDEN_SHOULDERS }));
+    expect(r.waitingForBreak).toBe(false);
+  });
+
+  it('흐트러짐을 기다리는 동안에는 hint가 나오지 않는다', () => {
+    const { r, c } = squatBack();
+    const out = feed(r, c.frames(hold(175, 15000), 'knee'));
+    expect(types(out)).not.toContain('hint');
+  });
+
+  it('흐트러짐을 기다리는 중 pause → resume(직접 누른 다시 시작)이면 기다림을 푼다', () => {
+    const { r, c } = squatBack();
+    expect(r.waitingForBreak).toBe(true);
+    r.pause(c.t);
+    r.resume(c.t + 3000);
+    c.t += 3000;
+    expect(r.waitingForBreak).toBe(false);
+    expect(standThenStarts(r, c)).toBe(true);
   });
 });

@@ -144,7 +144,7 @@ Phase 0에서 갤럭시 S23 앱이 30fps로 동작하고, 횟수·시간을 실�
 ### 5.4 세트 진행기 `SetRunner` (새로 만듦)
 - 위치: `src/session/setRunner.ts`
 - 입력: `push(frame: PoseFrame)`, `tick(t: number)`(프레임이 없을 때의 시간 진행), `stop(t)`, `pause(t)`, `resume(t)`
-- 출력: 호출마다 그 사이 일어난 이벤트 배열(일어난 순서). 조회: `phase`, `tracker`(TrackerState), `paused`, `result`(끝난 세트 결과의 **복사본**, 끝나기 전이거나 시작 전 stop이면 null)
+- 출력: 호출마다 그 사이 일어난 이벤트 배열(일어난 순서). 조회: `phase`, `tracker`(TrackerState), `paused`, `waitingForBreak`(backToReady 뒤 흐트러짐을 기다리는 중), `result`(끝난 세트 결과의 **복사본**, 끝나기 전이거나 시작 전 stop이면 null)
 - 시간: `f.t`와 `tick(t)`는 같은 시계다. 지금까지 본 시각보다 이른 push·tick은 무시한다.
 - 상태: `waitingReady | countdown | active | finished`
 - 시작 방식은 운동 정의의 `start` 설정으로 정한다.
@@ -166,7 +166,10 @@ Phase 0에서 갤럭시 S23 앱이 30fps로 동작하고, 횟수·시간을 실�
   - `stop(t)`: 먼저 시간을 흘려(advance) idle이 지났으면 idle로, 카운트다운이 끝났으면 start부터 처리한 뒤 끝낸다. 되돌림 기준 시각은 일시정지 중이면 `pausedAt`(그 순간에 시간이 멈춰 있다), 아니면 지금 시각이다. 세트가 시작되기 전(waitingReady·countdown)에 stop하면 기록 없이 finished 상태만 되고 이벤트는 `[]`다.
   - `resume`: waitingReady였다면 트래커를 새로 만든다(일시정지 시간 때문에 보정이 타임아웃되거나 HoldTimer가 일시정지 전부터 매달린 것으로 보는 일을 막는다). active였다면 트래커를 그대로 둔다. 카운트다운 기준 시각과 마지막 프레임 시각은 일시정지한 만큼(d) 뒤로 민다. idle·noStart 기준 시각은 **복귀 여유**를 준다: `idleFrom = max(idleFrom + d, resumeT)`(10.1(b)). 그래서 resume 뒤 적어도 idleEndMs(5초)·noStartMs(20초)는 끝나거나 돌아가지 않는다. hint 지속 시간은 resume 뒤 처음부터 다시 잰다.
   - hint 지속 시간: 진단별로 시작 시각을 기억한다. 진단이 바뀌거나 ok 프레임이 하나라도 끼면 처음부터 다시 잰다. notReady 유예는 waitingReady에 들어간 시각(세트 처음의 첫 push·tick, backToReady, waitingReady에서의 resume)부터 잰다. 유예 중에 시작된 notReady는 유예가 끝난 시각부터 1500ms를 잰다(들어간 뒤 4500ms에 첫 hint).
-  - backToReady 뒤 "흐트러짐": calibrate 운동은 판정 신호가 안 보이거나(null·NaN, 진단 notVisible에 해당) `ready`가 false(notReady에 해당)인 프레임, pose 운동은 `startPose`(매달리기는 `holding`)가 true가 아닌 프레임이다. 흐트러짐을 보기 전의 프레임은 트래커에 넣지 않고 시작 판정도 하지 않는다(판정 관절이 안 보일 때의 notVisible hint만 본다). 흐트러진 프레임부터는 보통처럼 트래커에 넣어 보정·시작 판정을 다시 한다. 'visible'(네거티브)은 backToReady가 없으므로 해당하지 않는다.
+  - backToReady 뒤 "흐트러짐": 흐트러진 프레임이 **400ms 연속**이어야 인정한다(visibility 한 프레임 깜빡임은 무시). 중간에 흐트러지지 않은 프레임이 하나라도 오면 처음부터 다시 잰다. 흐트러진 프레임은 다음과 같다.
+    - calibrate 운동: 판정 신호가 안 보임(null·NaN), `ready`가 true가 아님(false, 또는 몸통이 화면 밖이라 null), 또는 신호가 rest 쪽 `minBaseline`보다 안쪽(`restSide` 부호 반영. 스쿼트는 무릎 150° 미만: 안내를 듣고 바로 앉거나 스쿼트를 시작한 경우). ready가 계속 null이면 보정은 원래 규칙대로 하므로 기본값 보정으로 다시 도는 반복은 받아들인다.
+    - pose 운동: `startPose`(매달리기는 `holding`)가 true가 아닌 프레임.
+  - 흐트러짐을 기다리는 동안(`waitingForBreak` true)의 프레임은 트래커에 넣지 않고, 시작 판정도 hint도 하지 않는다. 안내("잠깐 쉬었다가 다시 자세를 잡아 주세요")는 앱이 `waitingForBreak`를 보고 한다. 흐트러짐이 인정된 프레임부터는 보통처럼 트래커에 넣어 보정·시작 판정을 다시 한다. 기다리는 중 resume(사용자가 직접 누른 "다시 시작")하면 기다림을 푼다. 'visible'(네거티브)은 backToReady가 없으므로 해당하지 않는다.
   - 매달리기에서 프레임이 끊기면 `tick(t)`가 HoldTimer와 같은 규칙으로 판정한다: 마지막 프레임 뒤 `hold.graceMs`가 지나면 `released`로 끝낸다. 이때 heldMs는 HoldTimer가 멈춰 둔 값이다.
   - 매달리기 `heldMs`는 일시정지 시간을 뺀다. HoldTimer는 일시정지를 모르므로, resume 뒤 holding 프레임이 와서 값이 일시정지 구간을 건너 늘었을 때만(증가가 확인됐을 때만) 그 일시정지 시간을 뺀다.
 - `result`는 세트 기록이다: 목표 종류·값, 실제 횟수, 버틴 ms, 반복별 내려온 ms, 세트 시작·끝 시각(프레임 시계), 종료 사유.

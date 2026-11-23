@@ -1,5 +1,6 @@
 import type { PoseFrame } from '../types';
 import type { RepEvent } from '../counter/repCounter';
+import { restSign } from '../counter/repEngine';
 import {
   EXERCISES,
   createTracker,
@@ -44,6 +45,8 @@ export type SetEvent =
 
 /** 시작 자세가 이만큼 이어지면 시작(pullup). deadHang은 HoldTimer의 시작 판정을 그대로 쓴다 */
 const START_POSE_MS = 300;
+/** backToReady 뒤 준비 자세가 이만큼 연속으로 흐트러져야 흐트러짐으로 본다(visibility 한 프레임 깜빡임 무시) */
+const BREAK_MS = 400;
 const COUNTDOWN_NS = [3, 2, 1] as const;
 
 /**
@@ -78,9 +81,11 @@ export class SetRunner {
   private readyEnteredAt: number | null = null;
   /**
    * backToReady 뒤 준비 자세가 한 번 흐트러지기를 기다리는 중(10.1(c)). 이 동안은 프레임을 트래커에 넣지 않고
-   * 시작 판정도 하지 않는다. 흐트러진 프레임이 오면 내리고, 그 프레임부터 보통처럼 처리한다.
+   * 시작 판정도 hint도 하지 않는다. 흐트러짐이 BREAK_MS 이어지면 내리고, 그 프레임부터 보통처럼 처리한다.
    */
   private needBreak = false;
+  /** 지금 이어지는 흐트러짐의 첫 프레임 시각 */
+  private breakSince: number | null = null;
 
   /** pullup 시작 자세가 처음 true였던 시각 */
   private poseSince: number | null = null;
@@ -137,6 +142,11 @@ export class SetRunner {
     return this.pausedAt !== null;
   }
 
+  /** backToReady 뒤 준비 자세가 한 번 흐트러지기를 기다리는 중(앱이 "잠깐 쉬었다가 다시 자세를" 안내에 쓴다) */
+  get waitingForBreak(): boolean {
+    return this.ph === 'waitingReady' && this.needBreak;
+  }
+
   push(f: PoseFrame): SetEvent[] {
     if (this.ph === 'finished' || this.pausedAt !== null || f.t < this.lastT) return [];
     this.readyEnteredAt ??= f.t;
@@ -149,12 +159,16 @@ export class SetRunner {
     this.lastFrameT = f.t;
 
     if (ph === 'waitingReady' && this.needBreak) {
+      // 기다리는 동안은 트래커에 넣지 않고 시작 판정도 hint도 하지 않는다(안내는 앱이 waitingForBreak로 한다).
+      this.diagSince = null;
       if (!this.isBreak(f)) {
-        // 아직 준비 자세 그대로다: 트래커에 넣지 않고 시작 판정도 하지 않는다.
-        this.hint(f.t, this.visibleDiagnosis(f), out);
+        this.breakSince = null; // 흐트러지지 않은 프레임이 하나라도 오면 처음부터 다시 잰다
         return out;
       }
+      this.breakSince ??= f.t;
+      if (f.t - this.breakSince < BREAK_MS) return out;
       this.needBreak = false;
+      this.breakSince = null;
     }
     if (ph === 'countdown') {
       // 카운트다운 중에도 트래커는 계속 돌린다(자세가 깨져도 진행, 반복은 start 기준점으로 걸러짐).
@@ -200,6 +214,9 @@ export class SetRunner {
     this.diagSince = null;
     if (this.ph === 'waitingReady') {
       this.readyEnteredAt = t;
+      // 사용자가 직접 "다시 시작"을 눌렀다: 흐트러짐을 기다리지 않고 바로 준비 자세 판정을 받는다.
+      this.needBreak = false;
+      this.breakSince = null;
       // 보정·시작 자세 판정을 처음부터 다시 한다. 일시정지 시간 때문에 보정이 타임아웃되어 기본값으로
       // 잡히거나, HoldTimer가 일시정지 전 시각부터 매달린 것으로 보는 일을 막는다.
       this.tr = createTracker(this.cfg.exercise);
@@ -410,11 +427,13 @@ export class SetRunner {
     this.readyEnteredAt = t;
     this.diagSince = null;
     this.needBreak = true;
+    this.breakSince = null;
   }
 
   /**
-   * 준비 자세가 흐트러진 프레임인가.
-   * calibrate: 신호가 안 보이거나(트래커 진단 notVisible) 준비 자세가 아님(ready false, 진단 notReady).
+   * 준비 자세가 흐트러진 프레임인가(BREAK_MS 연속이어야 인정).
+   * calibrate: 신호가 안 보임(null·NaN), ready가 true가 아님(false 또는 null: 몸통이 안 보임),
+   *   또는 신호가 rest 쪽 minBaseline보다 안쪽(스쿼트면 무릎 150° 미만: 앉거나 스쿼트를 시작함).
    * pose: 시작 자세(pullup startPose, deadHang holding)가 true가 아님.
    */
   private isBreak(f: PoseFrame): boolean {
@@ -423,15 +442,10 @@ export class SetRunner {
     if (def.start === 'pose') return (def.startPose ? def.startPose(f) : null) !== true;
     const v = def.signal(f);
     if (v === null || !Number.isFinite(v)) return true;
-    return def.mode === 'adaptive' && def.ready(f) === false;
-  }
-
-  /** 흐트러짐을 기다리는 동안(트래커에 넣지 않는 프레임)의 hint용 진단: 판정 관절이 안 보이면 notVisible */
-  private visibleDiagnosis(f: PoseFrame): Diagnosis {
-    const def = this.def;
-    if (def.kind === 'hold') return def.holding(f) === null ? 'notVisible' : 'ok';
-    const v = def.signal(f);
-    return v === null || !Number.isFinite(v) ? 'notVisible' : 'ok';
+    if (def.mode !== 'adaptive') return false;
+    if (def.ready(f) !== true) return true;
+    const k = restSign(def.adaptive.restSide);
+    return k * v < k * def.adaptive.minBaseline;
   }
 }
 

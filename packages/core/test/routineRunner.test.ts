@@ -730,9 +730,9 @@ describe('RoutineRunner: 수정 1회차', () => {
     expect(btr.map((x) => [x.ev.exerciseIndex, x.ev.setIndex])).toEqual([[0, 1]]);
     expect(d.rr.current).toEqual({ exerciseIndex: 0, setIndex: 1 });
     expect(d.rr.phase).toBe('set');
-    // 10.1(c): backToReady 뒤에는 준비 자세가 한 번 흐트러져야 다시 시작한다(다리가 안 보이는 몇 프레임).
+    // 10.1(c): backToReady 뒤에는 준비 자세가 한 번 흐트러져야 다시 시작한다(다리가 안 보이는 400ms 이상).
     const hidden = [LM.L_HIP, LM.R_HIP, LM.L_KNEE, LM.R_KNEE, LM.L_ANKLE, LM.R_ANKLE];
-    for (let i = 0; i < 5; i++, d.t += DT) d.push(buildPose({ t: d.t, knee: 175, hidden }));
+    for (let i = 0; i < 16; i++, d.t += DT) d.push(buildPose({ t: d.t, knee: 175, hidden }));
     d.doSet('squat', 2);
     const s = sessionOf(d.log);
     expect(s.sets.map((x) => x.setIndex)).toEqual([0, 1]);
