@@ -86,10 +86,16 @@ export class WorkoutEngine {
       } catch {
         // 화면 켜짐은 있으면 좋은 것. 실패해도 운동은 한다.
       }
+      if (this.gone()) {
+        // keepAwake.on을 기다리는 동안 dispose되거나 루틴이 끝났다: 카메라는 켜지 않는다.
+        this.starting = false;
+        await this.safeOff();
+        return;
+      }
       await this.d.pose.start(video);
     } catch (e) {
       this.starting = false;
-      if (this.disposed) {
+      if (this.gone()) {
         void this.safeOff();
         return;
       }
@@ -99,8 +105,8 @@ export class WorkoutEngine {
       return;
     }
     this.starting = false;
-    if (this.disposed) {
-      // start를 기다리는 동안 dispose됐다: 켜 둔 것을 끄고 루프는 시작하지 않는다.
+    if (this.gone()) {
+      // start를 기다리는 동안 dispose되거나 루틴이 끝났다(stop·마지막 skipExercise): 켜 둔 것을 끄고 루프는 시작하지 않는다.
       this.d.pose.stop();
       void this.safeOff();
       return;
@@ -166,13 +172,23 @@ export class WorkoutEngine {
     if (this.disposed) return;
     this.disposed = true;
     this.teardown();
+    try {
+      this.d.speech.cancel();
+    } catch {
+      // 무시
+    }
     this.subs.clear();
   }
 
   // ---- 내부 ----
 
+  /** dispose됐거나 루틴이 끝났다 */
+  private gone(): boolean {
+    return this.disposed || this.ended !== null;
+  }
+
   private canControl(): boolean {
-    return !this.disposed && this.ended === null;
+    return !this.gone();
   }
 
   /** 한 호출에서 나온 이벤트를 처리한다: 음성 → 저장 → (끝이면) 정리 → 알림. 이 호출의 저장까지 기다리는 promise */

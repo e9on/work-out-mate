@@ -162,7 +162,9 @@ export function createMediapipePose(): PoseSource {
         delegate = lm.delegate;
       } catch (e) {
         if (my === gen) release();
-        throw toCameraError(e);
+        // denied·notFound는 getUserMedia 단계만. play()의 NotAllowedError(자동 재생 거부)는 권한 거부가 아니다.
+        if (e instanceof CameraError) throw e;
+        throw new CameraError('other', e instanceof Error ? e.message : undefined);
       }
       running = true;
       schedule(video, my);

@@ -433,6 +433,65 @@ describe('WorkoutEngine: 카메라 오류', () => {
     expect(r.pose.stops).toBe(1);
     expect(r.calls.at(-1)).toBe('keepAwake.off');
   });
+
+  it.each([
+    ['stop', (e: WorkoutEngine) => e.stop()],
+    ['마지막 운동의 skipExercise', (e: WorkoutEngine) => e.skipExercise()],
+  ])('start가 끝나기 전에 %s로 루틴이 끝나면, start가 끝난 뒤 카메라·화면 켜짐을 정리하고 루프를 시작하지 않는다', async (_n, end) => {
+    const r = makeRig([sq(1, 2, 0)]);
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    let open!: () => void;
+    r.pose.gate = new Promise<void>((res) => (open = res));
+    const p = e.start(video());
+    await flush();
+    await end(e);
+    expect(r.last.ended).not.toBeNull();
+    open();
+    await p;
+    await flush();
+    expect(r.intervals.size).toBe(0);
+    expect(r.pose.listeners).toBe(0);
+    expect(r.pose.stops).toBe(1);
+    expect(r.calls.at(-1)).toBe('keepAwake.off');
+    const n = r.views.length;
+    r.advance(1000);
+    expect(r.views.length).toBe(n);
+  });
+
+  it.each([
+    ['dispose', (e: WorkoutEngine) => e.dispose()],
+    ['stop', (e: WorkoutEngine) => void e.stop()],
+  ])('keepAwake.on을 기다리는 중에 %s되면 pose.start를 부르지 않고 화면 켜짐만 끈다', async (_n, end) => {
+    const r = makeRig([sq(1, 2, 0)]);
+    let open!: () => void;
+    r.keepAwake.on.mockImplementationOnce(
+      () =>
+        new Promise<void>((res) => {
+          r.calls.push('keepAwake.on');
+          open = res;
+        }),
+    );
+    const e = new WorkoutEngine(r.deps);
+    const p = e.start(video());
+    await flush();
+    end(e);
+    open();
+    await p;
+    await flush();
+    expect(r.pose.starts).toBe(0);
+    expect(r.calls).toEqual(['keepAwake.on', 'keepAwake.off']);
+    expect(r.intervals.size).toBe(0);
+  });
+
+  it('dispose하면 speech.cancel을 부른다', async () => {
+    const cancel = vi.fn();
+    const r = makeRig([sq(1, 2, 0)], { speech: { speak: async () => 'ok', cancel } });
+    const e = new WorkoutEngine(r.deps);
+    await e.start(video());
+    e.dispose();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('WorkoutEngine: 진행', () => {

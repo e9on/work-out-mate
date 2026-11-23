@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CameraError } from '../src/ports/pose';
-import { toCameraError } from '../src/platform/mediapipePose';
+import { createMediapipePose, toCameraError } from '../src/platform/mediapipePose';
 import { createWebSpeech } from '../src/platform/webSpeech';
 import { createKeepAwake, type KeepAwakeEnv } from '../src/platform/keepAwake';
 
@@ -23,6 +23,35 @@ describe('toCameraError (getUserMedia 오류 → CameraError)', () => {
     expect(toCameraError(null).kind).toBe('other');
     const ce = new CameraError('notFound');
     expect(toCameraError(ce)).toBe(ce);
+  });
+});
+
+describe('createMediapipePose.start 오류 단계', () => {
+  const realMd = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+  afterEach(() => {
+    if (realMd) Object.defineProperty(navigator, 'mediaDevices', realMd);
+    else Reflect.deleteProperty(navigator, 'mediaDevices');
+  });
+  function setGetUserMedia(fn: () => Promise<unknown>) {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: fn } });
+  }
+
+  it('getUserMedia의 NotAllowedError는 denied', async () => {
+    setGetUserMedia(() => Promise.reject(new DOMException('x', 'NotAllowedError')));
+    const err = await createMediapipePose().start(document.createElement('video')).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CameraError);
+    expect((err as CameraError).kind).toBe('denied');
+  });
+
+  it('video.play()의 NotAllowedError(자동 재생 거부)는 denied가 아니라 other이고 트랙을 멈춘다', async () => {
+    const track = { stop: vi.fn() };
+    setGetUserMedia(async () => ({ getTracks: () => [track] }));
+    const video = document.createElement('video');
+    video.play = () => Promise.reject(new DOMException('autoplay', 'NotAllowedError'));
+    const err = await createMediapipePose().start(video).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CameraError);
+    expect((err as CameraError).kind).toBe('other');
+    expect(track.stop).toHaveBeenCalled();
   });
 });
 
