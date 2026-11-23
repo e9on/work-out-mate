@@ -154,17 +154,19 @@ Phase 0에서 갤럭시 S23 앱이 30fps로 동작하고, 횟수·시간을 실�
   - 셋 다 같은 상태 기계를 쓰고, 카운트다운 길이만 0이 된다.
 - 이벤트(앱이 음성과 화면으로 바꿈)
   - `{type:'countdown', n:3|2|1}`, `{type:'start'}`
-  - `{type:'backToReady'}`: start 뒤 첫 반복 없이 noStartMs(기본 20초)가 지나 준비 자세 대기로 돌아갔다(세트가 끝난 것이 아니다. 트래커를 새로 만든다)
+  - `{type:'backToReady'}`: start 뒤 첫 반복 없이 noStartMs(기본 20초)가 지나 준비 자세 대기로 돌아갔다(세트가 끝난 것이 아니다. 트래커를 새로 만든다). 그 뒤에는 준비 자세가 **한 번 흐트러졌다가 다시 잡혀야** 다시 시작한다(10.1(c)). 그래서 서 있기(매달려 있기)만 하면 backToReady는 한 번만 나온다.
   - `{type:'rep', count}`, `{type:'hold', seconds}`(매달리기는 1초마다)
   - `{type:'goalReached'}`
   - `{type:'finished', reason:'target'|'idle'|'manual'|'released', result}`. EndReason에 `noStart`는 없다.
-  - `{type:'hint', diagnosis}`: ok가 아닌 진단. 같은 진단은 hintRepeatMs(기본 10초) 간격으로 다시 내고, `calibratedByDefault`는 **세트당 한 번**만 낸다.
+  - `{type:'hint', diagnosis}`: ok가 아닌 진단. 같은 진단이 `hintAfterMs`(기본 1500ms) **이어져야** 처음 낸다(10.1(a)). waitingReady에 들어간 뒤 `notReadyGraceMs`(기본 3000ms) 동안은 notReady를 내지 않는다. 그 뒤 같은 진단은 hintRepeatMs(기본 10초) 간격으로 다시 내고, `calibratedByDefault`는 **세트당 한 번**만 낸다. countdown 중에는 내지 않는다.
 - **음성 문구는 코어가 정하지 않는다.** 이벤트만 내보내고, 문구와 말하기는 앱이 맡는다(언어와 플랫폼을 분리하기 위해서다).
 - 2절의 규칙(5초 반복 없음, 20초 시작 없음, 그만하기 직전 1.5초 되돌림, 목표 도달, 매달리기 목표 달성 후 계속)을 구현한다. 시간 값은 설정으로 둔다.
 - 구현된 세부 규칙
   - 카운트다운: `countdownMs` 안에 들어가는 숫자만 낸다(`n*1000 <= countdownMs`인 n. 1500이면 1만, 0이면 없음). 3000이면 3·2·1이 0·1000·2000ms에, start는 3000ms에 나온다. 카운트다운 중에도 트래커는 돌리고, start 시점 이전에 확정된 반복은 세지 않는다.
   - `stop(t)`: 먼저 시간을 흘려(advance) idle이 지났으면 idle로, 카운트다운이 끝났으면 start부터 처리한 뒤 끝낸다. 되돌림 기준 시각은 일시정지 중이면 `pausedAt`(그 순간에 시간이 멈춰 있다), 아니면 지금 시각이다. 세트가 시작되기 전(waitingReady·countdown)에 stop하면 기록 없이 finished 상태만 되고 이벤트는 `[]`다.
-  - `resume`: waitingReady였다면 트래커를 새로 만든다(일시정지 시간 때문에 보정이 타임아웃되거나 HoldTimer가 일시정지 전부터 매달린 것으로 보는 일을 막는다). active였다면 트래커를 그대로 둔다. 카운트다운·idle 기준 시각과 마지막 프레임 시각은 일시정지한 만큼 뒤로 민다.
+  - `resume`: waitingReady였다면 트래커를 새로 만든다(일시정지 시간 때문에 보정이 타임아웃되거나 HoldTimer가 일시정지 전부터 매달린 것으로 보는 일을 막는다). active였다면 트래커를 그대로 둔다. 카운트다운 기준 시각과 마지막 프레임 시각은 일시정지한 만큼(d) 뒤로 민다. idle·noStart 기준 시각은 **복귀 여유**를 준다: `idleFrom = max(idleFrom + d, resumeT)`(10.1(b)). 그래서 resume 뒤 적어도 idleEndMs(5초)·noStartMs(20초)는 끝나거나 돌아가지 않는다. hint 지속 시간은 resume 뒤 처음부터 다시 잰다.
+  - hint 지속 시간: 진단별로 시작 시각을 기억한다. 진단이 바뀌거나 ok 프레임이 하나라도 끼면 처음부터 다시 잰다. notReady 유예는 waitingReady에 들어간 시각(세트 처음의 첫 push·tick, backToReady, waitingReady에서의 resume)부터 잰다. 유예 중에 시작된 notReady는 유예가 끝난 시각부터 1500ms를 잰다(들어간 뒤 4500ms에 첫 hint).
+  - backToReady 뒤 "흐트러짐": calibrate 운동은 판정 신호가 안 보이거나(null·NaN, 진단 notVisible에 해당) `ready`가 false(notReady에 해당)인 프레임, pose 운동은 `startPose`(매달리기는 `holding`)가 true가 아닌 프레임이다. 흐트러짐을 보기 전의 프레임은 트래커에 넣지 않고 시작 판정도 하지 않는다(판정 관절이 안 보일 때의 notVisible hint만 본다). 흐트러진 프레임부터는 보통처럼 트래커에 넣어 보정·시작 판정을 다시 한다. 'visible'(네거티브)은 backToReady가 없으므로 해당하지 않는다.
   - 매달리기에서 프레임이 끊기면 `tick(t)`가 HoldTimer와 같은 규칙으로 판정한다: 마지막 프레임 뒤 `hold.graceMs`가 지나면 `released`로 끝낸다. 이때 heldMs는 HoldTimer가 멈춰 둔 값이다.
   - 매달리기 `heldMs`는 일시정지 시간을 뺀다. HoldTimer는 일시정지를 모르므로, resume 뒤 holding 프레임이 와서 값이 일시정지 구간을 건너 늘었을 때만(증가가 확인됐을 때만) 그 일시정지 시간을 뺀다.
 - `result`는 세트 기록이다: 목표 종류·값, 실제 횟수, 버틴 ms, 반복별 내려온 ms, 세트 시작·끝 시각(프레임 시계), 종료 사유.

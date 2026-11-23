@@ -24,6 +24,10 @@ export type SetConfig = {
   idleEndMs?: number;
   /** 같은 진단 hint를 다시 내기까지의 최소 간격(ms). 기본 10000. calibratedByDefault는 세트당 한 번만 */
   hintRepeatMs?: number;
+  /** 같은 진단이 이 시간(ms) 이어져야 hint를 낸다. 기본 1500 */
+  hintAfterMs?: number;
+  /** waitingReady에 들어간 뒤 이 시간(ms) 동안은 notReady hint를 내지 않는다. 기본 3000 */
+  notReadyGraceMs?: number;
 };
 
 export type SetPhase = 'waitingReady' | 'countdown' | 'active' | 'finished';
@@ -55,6 +59,8 @@ export class SetRunner {
   private readonly undoMs: number;
   private readonly idleEndMs: number;
   private readonly hintRepeatMs: number;
+  private readonly hintAfterMs: number;
+  private readonly notReadyGraceMs: number;
 
   private tr: Tracker;
   private ph: SetPhase = 'waitingReady';
@@ -66,6 +72,15 @@ export class SetRunner {
   private pausedAt: number | null = null;
   /** 진단별 마지막 hint 시각 */
   private readonly hintAt = new Map<Diagnosis, number>();
+  /** 지금 이어지고 있는 ok가 아닌 진단과 그 진단이 시작된 시각(hint 지속 시간 판정) */
+  private diagSince: { d: Diagnosis; t: number } | null = null;
+  /** waitingReady에 들어간 시각(notReady 유예 기준). 세트 처음은 첫 push·tick 시각 */
+  private readyEnteredAt: number | null = null;
+  /**
+   * backToReady 뒤 준비 자세가 한 번 흐트러지기를 기다리는 중(10.1(c)). 이 동안은 프레임을 트래커에 넣지 않고
+   * 시작 판정도 하지 않는다. 흐트러진 프레임이 오면 내리고, 그 프레임부터 보통처럼 처리한다.
+   */
+  private needBreak = false;
 
   /** pullup 시작 자세가 처음 true였던 시각 */
   private poseSince: number | null = null;
@@ -100,6 +115,8 @@ export class SetRunner {
     this.undoMs = cfg.undoBeforeStopMs ?? 1500;
     this.idleEndMs = cfg.idleEndMs ?? this.def.idleEndMs;
     this.hintRepeatMs = cfg.hintRepeatMs ?? 10000;
+    this.hintAfterMs = cfg.hintAfterMs ?? 1500;
+    this.notReadyGraceMs = cfg.notReadyGraceMs ?? 3000;
     this.tr = createTracker(cfg.exercise);
   }
 
@@ -122,6 +139,7 @@ export class SetRunner {
 
   push(f: PoseFrame): SetEvent[] {
     if (this.ph === 'finished' || this.pausedAt !== null || f.t < this.lastT) return [];
+    this.readyEnteredAt ??= f.t;
     const out: SetEvent[] = [];
     // 먼저 시간을 흘려 카운트다운·idle·noStart를 처리하고, 그다음 이 프레임을 지금 단계에 맞게 넣는다.
     this.advance(f.t, out);
@@ -130,6 +148,14 @@ export class SetRunner {
     this.lastT = f.t;
     this.lastFrameT = f.t;
 
+    if (ph === 'waitingReady' && this.needBreak) {
+      if (!this.isBreak(f)) {
+        // 아직 준비 자세 그대로다: 트래커에 넣지 않고 시작 판정도 하지 않는다.
+        this.hint(f.t, this.visibleDiagnosis(f), out);
+        return out;
+      }
+      this.needBreak = false;
+    }
     if (ph === 'countdown') {
       // 카운트다운 중에도 트래커는 계속 돌린다(자세가 깨져도 진행, 반복은 start 기준점으로 걸러짐).
       this.tr.push(f);
@@ -144,6 +170,7 @@ export class SetRunner {
 
   tick(t: number): SetEvent[] {
     if (this.ph === 'finished' || this.pausedAt !== null || t <= this.lastT) return [];
+    this.readyEnteredAt ??= t;
     const out: SetEvent[] = [];
     this.advance(t, out);
     this.lastT = Math.max(this.lastT, t);
@@ -166,9 +193,13 @@ export class SetRunner {
     this.pausedAt = null;
     if (this.ph === 'finished') return;
     this.countdownT0 += d;
-    this.idleFrom += d;
+    // 복귀 여유: 폰까지 걸어와 일시정지했다가 돌아가는 시간을 준다. idle·noStart는 resume 시각부터 다시 잰다.
+    this.idleFrom = Math.max(this.idleFrom + d, t);
     this.lastFrameT += d;
+    // 일시정지 전의 진단은 이어 보지 않는다(hint 지속 시간을 처음부터 잰다).
+    this.diagSince = null;
     if (this.ph === 'waitingReady') {
+      this.readyEnteredAt = t;
       // 보정·시작 자세 판정을 처음부터 다시 한다. 일시정지 시간 때문에 보정이 타임아웃되어 기본값으로
       // 잡히거나, HoldTimer가 일시정지 전 시각부터 매달린 것으로 보는 일을 막는다.
       this.tr = createTracker(this.cfg.exercise);
@@ -229,7 +260,7 @@ export class SetRunner {
     } else if (this.def.start !== 'visible' && t - this.idleFrom >= this.noStartMs) {
       // 'visible'(네거티브)은 보이면 바로 다시 시작하므로, 되돌리면 "다시 자세를" → "시작"이 20초마다 반복된다.
       out.push({ type: 'backToReady' });
-      this.toWaitingReady();
+      this.toWaitingReady(t);
     }
   }
 
@@ -289,6 +320,7 @@ export class SetRunner {
     this.pendingPauseMs = 0;
     this.rawAtResume = 0;
     this.pausedHoldMs = 0;
+    this.diagSince = null;
     out.push({ type: 'start' });
   }
 
@@ -330,7 +362,18 @@ export class SetRunner {
   }
 
   private hint(t: number, d: Diagnosis, out: SetEvent[]): void {
-    if (d === 'ok') return;
+    if (d === 'ok') {
+      this.diagSince = null;
+      return;
+    }
+    // 같은 진단이 hintAfterMs 이어져야 낸다(한 프레임짜리 깜빡임으로 음성이 끊기지 않게). 진단이 바뀌면 다시 잰다.
+    if (this.diagSince?.d !== d) this.diagSince = { d, t };
+    let since = this.diagSince.t;
+    // waitingReady에 막 들어온 사람(쉬는 시간이 끝나 아직 서 있는 등)에게는 notReady를 바로 말하지 않는다.
+    if (d === 'notReady' && this.ph === 'waitingReady' && this.readyEnteredAt !== null) {
+      since = Math.max(since, this.readyEnteredAt + this.notReadyGraceMs);
+    }
+    if (t - since < this.hintAfterMs) return;
     const last = this.hintAt.get(d);
     // 기본값 보정 안내는 세트당 한 번(운동 중 반복되면 방해). 나머지는 hintRepeatMs 간격으로 다시 낸다.
     if (last !== undefined && (d === 'calibratedByDefault' || t - last < this.hintRepeatMs)) return;
@@ -354,13 +397,41 @@ export class SetRunner {
     out.push({ type: 'finished', reason, result: copyResult(this.res) });
   }
 
-  /** 첫 반복 없이 시간이 지났다: 트래커를 새로 만들고 준비 자세부터 다시 */
-  private toWaitingReady(): void {
+  /**
+   * 첫 반복 없이 시간이 지났다: 트래커를 새로 만들고 준비 자세부터 다시. 서 있기(매달려 있기)만 해서는
+   * 다시 시작하지 않도록, 준비 자세가 한 번 흐트러질 때까지 시작 판정을 막는다(10.1(c)).
+   */
+  private toWaitingReady(t: number): void {
     this.tr = createTracker(this.cfg.exercise);
     this.ph = 'waitingReady';
     this.poseSince = null;
     this.reps = [];
     this.prevRep = null;
+    this.readyEnteredAt = t;
+    this.diagSince = null;
+    this.needBreak = true;
+  }
+
+  /**
+   * 준비 자세가 흐트러진 프레임인가.
+   * calibrate: 신호가 안 보이거나(트래커 진단 notVisible) 준비 자세가 아님(ready false, 진단 notReady).
+   * pose: 시작 자세(pullup startPose, deadHang holding)가 true가 아님.
+   */
+  private isBreak(f: PoseFrame): boolean {
+    const def = this.def;
+    if (def.kind === 'hold') return def.holding(f) !== true;
+    if (def.start === 'pose') return (def.startPose ? def.startPose(f) : null) !== true;
+    const v = def.signal(f);
+    if (v === null || !Number.isFinite(v)) return true;
+    return def.mode === 'adaptive' && def.ready(f) === false;
+  }
+
+  /** 흐트러짐을 기다리는 동안(트래커에 넣지 않는 프레임)의 hint용 진단: 판정 관절이 안 보이면 notVisible */
+  private visibleDiagnosis(f: PoseFrame): Diagnosis {
+    const def = this.def;
+    if (def.kind === 'hold') return def.holding(f) === null ? 'notVisible' : 'ok';
+    const v = def.signal(f);
+    return v === null || !Number.isFinite(v) ? 'notVisible' : 'ok';
   }
 }
 
