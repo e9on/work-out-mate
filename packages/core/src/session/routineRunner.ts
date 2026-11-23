@@ -1,7 +1,6 @@
 import type { PoseFrame } from '../types';
-import type { ExerciseId } from '../exercises/runner';
+import type { ExerciseId, TrackerState } from '../exercises/runner';
 import { SetRunner, type SetConfig, type SetEvent, type SetPhase } from './setRunner';
-import type { TrackerState } from '../exercises/runner';
 import type { Routine, SetLog, SetResult, Target, WorkoutSession } from './model';
 
 /** 쉬는 시간 뒤에 할 세트 */
@@ -42,8 +41,16 @@ export type RoutineSnapshot = {
   exerciseIndex: number;
   setIndex: number;
   /** 세트 중일 때만. count는 start 이후 센 반복 수(waitingReady·countdown에서는 0) */
-  set: { phase: SetPhase; tracker: TrackerState; count: number; heldMs: number; waitingForBreak: boolean } | null;
-  /** 쉬는 시간일 때만 */
+  set: {
+    setPhase: SetPhase;
+    tracker: TrackerState;
+    count: number;
+    heldMs: number;
+    waitingForBreak: boolean;
+    /** countdown일 때 시작까지 남은 ms, 아니면 null */
+    countdownRemainingMs: number | null;
+  } | null;
+  /** 쉬는 시간일 때만. remainingMs는 화면에서 올림 정수 초로 보여야 restTick과 맞는다 */
   rest: { remainingMs: number; totalMs: number; next: NextSet } | null;
 };
 
@@ -230,14 +237,20 @@ export class RoutineRunner {
       const r = this.runner;
       return {
         ...base,
-        set: { phase: r.phase, tracker: r.tracker, count: r.count, heldMs: r.heldMs, waitingForBreak: r.waitingForBreak },
+        set: {
+          setPhase: r.phase,
+          tracker: r.tracker,
+          count: r.count,
+          heldMs: r.heldMs,
+          waitingForBreak: r.waitingForBreak,
+          countdownRemainingMs: r.countdownRemainingMs(this.nowFor(t)),
+        },
         rest: null,
       };
     }
     if (this.ph === 'rest' && this.rest) {
       const r = this.rest;
-      const now = this.pausedAt !== null ? this.pausedAt : Math.max(t, this.lastT);
-      const remainingMs = Math.min(r.ms, Math.max(0, r.ms - (now - r.t0 - r.pausedMs)));
+      const remainingMs = Math.min(r.ms, this.restRemainingMs(this.nowFor(t)));
       return { ...base, set: null, rest: { remainingMs, totalMs: r.ms, next: this.nextSet(r.next) } };
     }
     return { ...base, set: null, rest: null };
@@ -249,10 +262,21 @@ export class RoutineRunner {
    */
   sessionSoFar(t: number): WorkoutSession {
     if (this.final) return copySession(this.final);
-    return this.makeSession(t, false);
+    return this.makeSession(Math.max(t, this.lastT), false);
   }
 
   // ---- 내부 ----
+
+  /** snapshot 기준 시각: 일시정지 중이면 멈춘 순간, 아니면 max(t, 지금까지 본 시각) */
+  private nowFor(t: number): number {
+    return this.pausedAt !== null ? this.pausedAt : Math.max(t, this.lastT);
+  }
+
+  /** 쉬는 시간의 남은 ms(시각 now 기준, 일시정지 누적 반영). tick·restTick·restEnd·snapshot이 같이 쓴다 */
+  private restRemainingMs(now: number): number {
+    const r = this.rest!;
+    return Math.max(0, r.ms - (now - r.t0 - r.pausedMs));
+  }
 
   private makeSession(t: number, completed: boolean): WorkoutSession {
     return {
@@ -364,7 +388,7 @@ export class RoutineRunner {
 
   private advanceRest(t: number, out: RoutineEvent[]): void {
     const r = this.rest!;
-    const remaining = r.ms - (t - r.t0 - r.pausedMs);
+    const remaining = this.restRemainingMs(t);
     if (remaining <= 0) {
       // 큰 tick 점프로 남은 20초를 건너뛰었어도 "다음은…" 안내를 놓치지 않게 restEnd 바로 앞에서 낸다.
       this.nextUp(out);

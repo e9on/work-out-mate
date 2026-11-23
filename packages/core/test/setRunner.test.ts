@@ -459,7 +459,7 @@ describe('SetRunner: 수정 1회차', () => {
     it('매달린 채 pause 10초 → resume → 계속 매달림: 일시정지 시간이 빠진다', () => {
       const r = deadHang();
       const c = new Clock();
-      const out = feed(r, c.frames(hold(170, 3000), 'elbow', { wristAboveNose: true }));
+      const out = feed(r, c.frames(hold(170, 3000), 'elbow', HANG));
       const pauseT = c.t;
       r.pause(pauseT);
       r.resume(pauseT + 10000);
@@ -992,7 +992,7 @@ describe('SetRunner: count·heldMs 조회 (2b 작업 2)', () => {
     expect(r.heldMs).toBe(0);
     const c = new Clock();
     feed(r, c.frames(hold(170, 500), 'elbow'));
-    feed(r, c.frames(hold(170, 3000), 'elbow', { wristAboveNose: true }));
+    feed(r, c.frames(hold(170, 3000), 'elbow', { wristAboveNose: true } as const));
     expect(r.count).toBe(0);
     expect(Math.abs(r.heldMs - 3000)).toBeLessThanOrEqual(400);
     const h = r.heldMs;

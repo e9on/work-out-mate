@@ -823,7 +823,7 @@ describe('RoutineRunner.snapshot · sessionSoFar (2b 작업 2)', () => {
     expect(s.paused).toBe(false);
     expect(s.exerciseIndex).toBe(0);
     expect(s.setIndex).toBe(0);
-    expect(s.set!.phase).toBe('active');
+    expect(s.set!.setPhase).toBe('active');
     expect(s.set!.count).toBe(2);
     expect(s.set!.heldMs).toBe(0);
     expect(s.set!.tracker.kind).toBe('reps');
@@ -840,19 +840,19 @@ describe('RoutineRunner.snapshot · sessionSoFar (2b 작업 2)', () => {
     expect(a.phase).toBe('rest');
     expect(a.set).toBeNull();
     expect(a.rest!.totalMs).toBe(60000);
-    expect(Math.abs(a.rest!.remainingMs - 35000)).toBeLessThanOrEqual(1);
+    expect(a.rest!.remainingMs).toBe(35000);
     expect(a.rest!.next).toMatchObject({ exerciseIndex: 0, setIndex: 1, exercise: 'squat' });
 
     d.tick(t0 + 25000);
     d.rr.pause(t0 + 25000);
     const b = d.rr.snapshot(t0 + 35000);
     expect(b.paused).toBe(true);
-    expect(Math.abs(b.rest!.remainingMs - 35000)).toBeLessThanOrEqual(1);
+    expect(b.rest!.remainingMs).toBe(35000);
 
     d.rr.resume(t0 + 35000);
     const c = d.rr.snapshot(t0 + 45000);
     expect(c.paused).toBe(false);
-    expect(Math.abs(c.rest!.remainingMs - 25000)).toBeLessThanOrEqual(1);
+    expect(c.rest!.remainingMs).toBe(25000);
   });
 
   it('snapshot은 상태를 바꾸지 않는다: phase·이벤트 순서가 같다', () => {
@@ -883,7 +883,7 @@ describe('RoutineRunner.snapshot · sessionSoFar (2b 작업 2)', () => {
     const t0 = lastRestStartT(d);
     d.tick(t0 + 10000);
     const early = d.rr.snapshot(t0);
-    expect(Math.abs(early.rest!.remainingMs - 50000)).toBeLessThanOrEqual(1);
+    expect(early.rest!.remainingMs).toBe(50000);
   });
 
   it('2세트 끝난 뒤 sessionSoFar: sets 2, completed false, id는 sessionId, 진행 중 세트는 제외, toEpoch 적용', () => {
@@ -928,5 +928,93 @@ describe('RoutineRunner.snapshot · sessionSoFar (2b 작업 2)', () => {
     expect(s).not.toBe(fin);
     expect(s.sets[0]).not.toBe(fin.sets[0]);
     expect(s.completed).toBe(true);
+  });
+
+  it('tick 큰 점프 뒤 남은 시간이 restEnd 시각과 맞는다(남은 1ms까지 restEnd 없음, 0에서 restEnd)', () => {
+    const d = runner([sq(2, 2, 60)]);
+    d.doSet('squat', 2);
+    const t0 = lastRestStartT(d);
+    d.tick(t0 + 40000);
+    expect(d.rr.snapshot(t0 + 40000).rest!.remainingMs).toBe(20000);
+    d.tick(t0 + 59999);
+    expect(d.rr.phase).toBe('rest');
+    expect(d.rr.snapshot(t0 + 59999).rest!.remainingMs).toBe(1);
+    const evs = d.tick(t0 + 60000);
+    expect(evs.some((e) => e.type === 'restEnd')).toBe(true);
+    expect(d.rr.snapshot(t0 + 60000).phase).toBe('set');
+  });
+
+  it('일시정지 → resume → tick 점프 뒤에도 남은 시간이 restEnd 시각과 맞는다', () => {
+    const d = runner([sq(2, 2, 60)]);
+    d.doSet('squat', 2);
+    const t0 = lastRestStartT(d);
+    d.tick(t0 + 20000);
+    d.rr.pause(t0 + 20000);
+    d.rr.resume(t0 + 50000); // 30초 멈춤
+    expect(d.rr.snapshot(t0 + 60000).rest!.remainingMs).toBe(30000);
+    d.tick(t0 + 89999);
+    expect(d.rr.phase).toBe('rest');
+    expect(d.rr.snapshot(t0 + 89999).rest!.remainingMs).toBe(1);
+    const evs = d.tick(t0 + 90000);
+    expect(evs.some((e) => e.type === 'restEnd')).toBe(true);
+  });
+
+  it('일시정지된 세트: paused true, setPhase 유지', () => {
+    const d = runner([sq(2, 5, 30)]);
+    d.frames('squat', [...hold(175, 1000), ...reps(175, 90, 1)]);
+    d.rr.pause(d.t);
+    const s = d.rr.snapshot(d.t + 5000);
+    expect(s.paused).toBe(true);
+    expect(s.set!.setPhase).toBe('active');
+    expect(s.set!.count).toBe(1);
+  });
+
+  it('countdown 중 countdownRemainingMs는 남은 ms, 일시정지하면 멈추고, 그 밖에는 null', () => {
+    const d = runner([sq(1, 5, 30)], undefined, { countdownMs: 3000 });
+    expect(d.rr.snapshot(0).set!.countdownRemainingMs).toBeNull();
+    d.frames('squat', hold(175, 6000), (e) => e.type === 'set' && e.event.type === 'countdown');
+    const t3 = ofType(d.log, 'set').find((x) => x.ev.event.type === 'countdown')!.t;
+    const a = d.rr.snapshot(t3);
+    expect(a.set!.setPhase).toBe('countdown');
+    expect(a.set!.count).toBe(0);
+    expect(a.set!.countdownRemainingMs).toBe(3000);
+    expect(d.rr.snapshot(t3 + 1000).set!.countdownRemainingMs).toBe(2000);
+    d.rr.pause(t3 + 1000);
+    expect(d.rr.snapshot(t3 + 9000).set!.countdownRemainingMs).toBe(2000);
+    d.rr.resume(t3 + 9000);
+    expect(d.rr.snapshot(t3 + 10000).set!.countdownRemainingMs).toBe(1000);
+  });
+
+  it('backToReady 뒤 waitingReady(waitingForBreak)에서 count는 0', () => {
+    const d = runner([sq(1, 5, 30)]);
+    d.frames('squat', hold(175, 25000), (e) => e.type === 'set' && e.event.type === 'backToReady');
+    expect(ofType(d.log, 'set').some((x) => x.ev.event.type === 'backToReady')).toBe(true);
+    const s = d.rr.snapshot(d.t);
+    expect(s.set!.setPhase).toBe('waitingReady');
+    expect(s.set!.waitingForBreak).toBe(true);
+    expect(s.set!.count).toBe(0);
+    expect(s.set!.countdownRemainingMs).toBeNull();
+  });
+
+  it('매달리기 세트의 snapshot.heldMs는 트래커 heldMs와 같다', () => {
+    const rr = new RoutineRunner(
+      routine([{ exercise: 'deadHang', sets: 1, target: { kind: 'seconds', seconds: 30 }, restSec: 0 }]),
+      { startT: 0, sessionId: 's1' },
+    );
+    let t = 0;
+    for (let i = 0; i < 120; i++, t += DT) rr.push(buildPose({ elbow: 170, wristAboveNose: true, t }));
+    const s = rr.snapshot(t);
+    expect(s.set!.tracker.kind).toBe('hold');
+    expect(s.set!.count).toBe(0);
+    expect(s.set!.heldMs).toBeGreaterThan(2000);
+    expect(s.set!.heldMs).toBe((s.set!.tracker as { heldMs: number }).heldMs);
+  });
+
+  it('sessionSoFar의 endedAt은 toEpoch(max(t, lastT))', () => {
+    const d = runner([sq(2, 2, 30)], (t) => 1_000_000 + t);
+    d.doSet('squat', 2);
+    const lastT = d.t - DT;
+    expect(d.rr.sessionSoFar(0).endedAt).toBe(1_000_000 + lastT);
+    expect(d.rr.sessionSoFar(lastT + 500).endedAt).toBe(1_000_000 + lastT + 500);
   });
 });

@@ -148,12 +148,19 @@ export class SetRunner {
     return this.tr.state().kind === 'reps' ? this.reps.length : 0;
   }
 
+  /** 카운트다운 중이면 시작까지 남은 ms(일시정지 중에는 멈춘 값), 아니면 null. t는 지금 시각(지금까지 본 시각보다 이르면 그 시각) */
+  countdownRemainingMs(t: number): number | null {
+    if (this.ph !== 'countdown') return null;
+    const ref = this.pausedAt !== null ? this.pausedAt : Math.max(t, this.lastT);
+    return Math.max(0, this.countdownT0 + this.countdownMs - ref);
+  }
+
   /** 매달린 시간(ms, 일시정지 시간 제외). start 전이나 반복 운동은 0. 결과의 heldMs와 같은 값 */
   get heldMs(): number {
     if (this.ph === 'finished') return this.res!.heldMs;
     if (this.ph !== 'active') return 0;
     const s = this.tr.state();
-    return s.kind === 'hold' ? this.heldMs_(s.heldMs) : 0;
+    return s.kind === 'hold' ? this.netHeldMs(s.heldMs) : 0;
   }
 
   /** backToReady 뒤 준비 자세가 한 번 흐트러지기를 기다리는 중(앱이 "잠깐 쉬었다가 다시 자세를" 안내에 쓴다) */
@@ -375,7 +382,7 @@ export class SetRunner {
       this.pausedHoldMs += this.pendingPauseMs;
       this.pendingPauseMs = 0;
     }
-    const held = this.heldMs_(s.heldMs);
+    const held = this.netHeldMs(s.heldMs);
     const secs = Math.floor(held / 1000);
     while (this.holdSecs < secs) {
       this.holdSecs += 1;
@@ -388,7 +395,7 @@ export class SetRunner {
     if (s.state === 'ended') this.finish(t, 'released', out);
   }
 
-  private heldMs_(raw: number): number {
+  private netHeldMs(raw: number): number {
     return Math.max(0, raw - this.pausedHoldMs);
   }
 
@@ -413,12 +420,11 @@ export class SetRunner {
   }
 
   private finish(t: number, reason: EndReason, out: SetEvent[]): void {
-    const s = this.tr.state();
     this.res = {
       exercise: this.cfg.exercise,
       target: this.cfg.target,
-      count: s.kind === 'reps' ? this.reps.length : 0,
-      heldMs: s.kind === 'hold' ? this.heldMs_(s.heldMs) : 0,
+      count: this.count,
+      heldMs: this.heldMs,
       negativeDescentMs: this.def.id === 'negative' ? this.reps.map((r) => r.outMs) : [],
       startT: this.startT,
       endT: t,
