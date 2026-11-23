@@ -22,7 +22,9 @@ console.log(`wasm 복사: ${wasmSrc} -> ${wasmDst}`);
 const MODEL = 'pose_landmarker_lite.task';
 const modelSrc = resolve(here, '../../spike/public/mediapipe', MODEL);
 if (!existsSync(modelSrc)) {
-  throw new Error(`${modelSrc} 이 없어요. 시험용 앱의 모델 파일을 먼저 준비하세요(인터넷에서 받지 않아요).`);
+  // 모델은 git에 없어서 CI에는 없다. 경고만 하고 넘어간다(APK 권한 검사에는 필요 없다).
+  console.warn(`경고: ${modelSrc} 이 없어서 모델은 복사하지 않아요. 실제 카메라 실행에는 필요해요(인터넷에서 받지 않아요).`);
+} else {
+  copyFileSync(modelSrc, resolve(dstDir, MODEL));
+  console.log(`모델 복사: ${modelSrc} -> ${resolve(dstDir, MODEL)}`);
 }
-copyFileSync(modelSrc, resolve(dstDir, MODEL));
-console.log(`모델 복사: ${modelSrc} -> ${resolve(dstDir, MODEL)}`);
