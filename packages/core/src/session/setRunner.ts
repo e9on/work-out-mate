@@ -142,6 +142,20 @@ export class SetRunner {
     return this.pausedAt !== null;
   }
 
+  /** start 이후 센 반복 수(start 전이나 매달리기 운동은 0). 결과의 count와 같은 값 */
+  get count(): number {
+    if (this.ph === 'finished') return this.res!.count;
+    return this.tr.state().kind === 'reps' ? this.reps.length : 0;
+  }
+
+  /** 매달린 시간(ms, 일시정지 시간 제외). start 전이나 반복 운동은 0. 결과의 heldMs와 같은 값 */
+  get heldMs(): number {
+    if (this.ph === 'finished') return this.res!.heldMs;
+    if (this.ph !== 'active') return 0;
+    const s = this.tr.state();
+    return s.kind === 'hold' ? this.heldMs_(s.heldMs) : 0;
+  }
+
   /** backToReady 뒤 준비 자세가 한 번 흐트러지기를 기다리는 중(앱이 "잠깐 쉬었다가 다시 자세를" 안내에 쓴다) */
   get waitingForBreak(): boolean {
     return this.ph === 'waitingReady' && this.needBreak;
@@ -361,7 +375,7 @@ export class SetRunner {
       this.pausedHoldMs += this.pendingPauseMs;
       this.pendingPauseMs = 0;
     }
-    const held = this.heldMs(s.heldMs);
+    const held = this.heldMs_(s.heldMs);
     const secs = Math.floor(held / 1000);
     while (this.holdSecs < secs) {
       this.holdSecs += 1;
@@ -374,7 +388,7 @@ export class SetRunner {
     if (s.state === 'ended') this.finish(t, 'released', out);
   }
 
-  private heldMs(raw: number): number {
+  private heldMs_(raw: number): number {
     return Math.max(0, raw - this.pausedHoldMs);
   }
 
@@ -404,7 +418,7 @@ export class SetRunner {
       exercise: this.cfg.exercise,
       target: this.cfg.target,
       count: s.kind === 'reps' ? this.reps.length : 0,
-      heldMs: s.kind === 'hold' ? this.heldMs(s.heldMs) : 0,
+      heldMs: s.kind === 'hold' ? this.heldMs_(s.heldMs) : 0,
       negativeDescentMs: this.def.id === 'negative' ? this.reps.map((r) => r.outMs) : [],
       startT: this.startT,
       endT: t,

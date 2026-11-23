@@ -1,6 +1,7 @@
 import type { PoseFrame } from '../types';
 import type { ExerciseId } from '../exercises/runner';
-import { SetRunner, type SetConfig, type SetEvent } from './setRunner';
+import { SetRunner, type SetConfig, type SetEvent, type SetPhase } from './setRunner';
+import type { TrackerState } from '../exercises/runner';
 import type { Routine, SetLog, SetResult, Target, WorkoutSession } from './model';
 
 /** 쉬는 시간 뒤에 할 세트 */
@@ -33,6 +34,18 @@ export type RoutineRunnerOptions = {
 };
 
 export type RoutinePhase = 'set' | 'rest' | 'done';
+
+/** 화면용 현재 상태 조회 결과 */
+export type RoutineSnapshot = {
+  phase: RoutinePhase;
+  paused: boolean;
+  exerciseIndex: number;
+  setIndex: number;
+  /** 세트 중일 때만. count는 start 이후 센 반복 수(waitingReady·countdown에서는 0) */
+  set: { phase: SetPhase; tracker: TrackerState; count: number; heldMs: number; waitingForBreak: boolean } | null;
+  /** 쉬는 시간일 때만 */
+  rest: { remainingMs: number; totalMs: number; next: NextSet } | null;
+};
 
 type Pos = { exerciseIndex: number; setIndex: number };
 
@@ -83,6 +96,8 @@ export class RoutineRunner {
   private prevEndT: number | null = null;
   /** 건너뛰기나 그만하기가 한 번이라도 있었다 */
   private interrupted = false;
+  /** routineEnd에서 만든 최종 세션(sessionSoFar가 끝난 뒤 복사본을 돌려준다) */
+  private final: WorkoutSession | null = null;
 
   constructor(routine: Routine, opts: RoutineRunnerOptions) {
     this.routine = routine;
@@ -205,7 +220,51 @@ export class RoutineRunner {
     return out;
   }
 
+  /**
+   * 시각 t 기준 화면용 상태. 상태를 바꾸지 않는다(lastT도 그대로). t가 지금까지 본 시각보다 이르면 그 시각 기준,
+   * 일시정지 중이면 일시정지한 순간 기준으로 남은 쉬는 시간을 계산한다.
+   */
+  snapshot(t: number): RoutineSnapshot {
+    const base = { phase: this.ph, paused: this.paused, ...this.current };
+    if (this.ph === 'set') {
+      const r = this.runner;
+      return {
+        ...base,
+        set: { phase: r.phase, tracker: r.tracker, count: r.count, heldMs: r.heldMs, waitingForBreak: r.waitingForBreak },
+        rest: null,
+      };
+    }
+    if (this.ph === 'rest' && this.rest) {
+      const r = this.rest;
+      const now = this.pausedAt !== null ? this.pausedAt : Math.max(t, this.lastT);
+      const remainingMs = Math.min(r.ms, Math.max(0, r.ms - (now - r.t0 - r.pausedMs)));
+      return { ...base, set: null, rest: { remainingMs, totalMs: r.ms, next: this.nextSet(r.next) } };
+    }
+    return { ...base, set: null, rest: null };
+  }
+
+  /**
+   * 지금까지 기록된 세트로 만든 세션(중간 저장용). completed는 항상 false, endedAt은 toEpoch(t), id는 sessionId라
+   * 나중 routineEnd의 세션이 같은 id로 덮어쓴다. 진행 중인 세트는 넣지 않는다. 끝난 뒤에는 최종 세션의 복사본.
+   */
+  sessionSoFar(t: number): WorkoutSession {
+    if (this.final) return copySession(this.final);
+    return this.makeSession(t, false);
+  }
+
   // ---- 내부 ----
+
+  private makeSession(t: number, completed: boolean): WorkoutSession {
+    return {
+      id: this.opts.sessionId,
+      routineId: this.routine.id,
+      routineName: this.routine.name,
+      startedAt: this.toEpoch(this.opts.startT),
+      endedAt: this.toEpoch(t),
+      completed,
+      sets: this.logs.map(copyLog),
+    };
+  }
 
   private takePending(): RoutineEvent[] {
     const out = this.pending;
@@ -351,15 +410,16 @@ export class RoutineRunner {
     for (let i = 0; i < this.routine.exercises.length; i++) total += this.setsOf(i);
     const completed =
       !this.interrupted && this.logs.length === total && this.logs.every((s) => s.endReason !== 'manual');
-    const session: WorkoutSession = {
-      id: this.opts.sessionId,
-      routineId: this.routine.id,
-      routineName: this.routine.name,
-      startedAt: this.toEpoch(this.opts.startT),
-      endedAt: this.toEpoch(t),
-      completed,
-      sets: this.logs.map((s) => ({ ...s, target: { ...s.target }, negativeDescentMs: [...s.negativeDescentMs] })),
-    };
+    const session = this.makeSession(t, completed);
+    this.final = copySession(session);
     out.push({ type: 'routineEnd', session });
   }
+}
+
+function copyLog(s: SetLog): SetLog {
+  return { ...s, target: { ...s.target }, negativeDescentMs: [...s.negativeDescentMs] };
+}
+
+function copySession(s: WorkoutSession): WorkoutSession {
+  return { ...s, sets: s.sets.map(copyLog) };
 }

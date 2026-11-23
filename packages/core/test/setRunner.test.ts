@@ -459,7 +459,7 @@ describe('SetRunner: 수정 1회차', () => {
     it('매달린 채 pause 10초 → resume → 계속 매달림: 일시정지 시간이 빠진다', () => {
       const r = deadHang();
       const c = new Clock();
-      const out = feed(r, c.frames(hold(170, 3000), 'elbow', HANG));
+      const out = feed(r, c.frames(hold(170, 3000), 'elbow', { wristAboveNose: true }));
       const pauseT = c.t;
       r.pause(pauseT);
       r.resume(pauseT + 10000);
@@ -968,5 +968,35 @@ describe('SetRunner: 작업 1 수정 1회차 (흐트러짐 400ms·스쿼트 굽�
     c.t += 3000;
     expect(r.waitingForBreak).toBe(false);
     expect(standThenStarts(r, c)).toBe(true);
+  });
+});
+
+describe('SetRunner: count·heldMs 조회 (2b 작업 2)', () => {
+  it('reps: start 전 0, start 뒤 센 반복 수, 끝난 뒤에도 결과와 같다. heldMs는 0', () => {
+    const r = new SetRunner({ exercise: 'squat', target: { kind: 'reps', reps: 3 }, countdownMs: 0 });
+    expect(r.count).toBe(0);
+    expect(r.heldMs).toBe(0);
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 1000), ...reps(175, 90, 2)], 'knee'));
+    expect(types(out).filter((t) => t === 'rep')).toHaveLength(2);
+    expect(r.count).toBe(2);
+    expect(r.heldMs).toBe(0);
+    feed(r, c.frames([...reps(175, 90, 1), ...hold(175, 3000)], 'knee'), out, (e) => e.type === 'finished');
+    expect(r.phase).toBe('finished');
+    expect(r.count).toBe(r.result!.count);
+    expect(r.count).toBe(3);
+  });
+
+  it('deadHang: heldMs는 매달린 시간(일시정지 제외), count는 0', () => {
+    const r = new SetRunner({ exercise: 'deadHang', target: { kind: 'seconds', seconds: 30 } });
+    expect(r.heldMs).toBe(0);
+    const c = new Clock();
+    feed(r, c.frames(hold(170, 500), 'elbow'));
+    feed(r, c.frames(hold(170, 3000), 'elbow', { wristAboveNose: true }));
+    expect(r.count).toBe(0);
+    expect(Math.abs(r.heldMs - 3000)).toBeLessThanOrEqual(400);
+    const h = r.heldMs;
+    r.pause(c.t);
+    expect(r.heldMs).toBe(h);
   });
 });

@@ -804,3 +804,129 @@ describe('RoutineRunner: 수정 1회차', () => {
     expect(s.completed).toBe(false);
   });
 });
+
+describe('RoutineRunner.snapshot · sessionSoFar (2b 작업 2)', () => {
+  it('세트 중 snapshot: count는 센 반복 수, tracker.kind가 맞고 rest는 null', () => {
+    const d = runner([sq(2, 5, 30)]);
+    const before = d.rr.snapshot(0);
+    expect(before.phase).toBe('set');
+    expect(before.set).not.toBeNull();
+    expect(before.set!.count).toBe(0);
+    expect(before.set!.heldMs).toBe(0);
+    expect(before.rest).toBeNull();
+
+    d.frames('squat', [...hold(175, 1000), ...reps(175, 90, 2)]);
+    const s = d.rr.snapshot(d.t);
+    const repEvents = ofType(d.log, 'set').filter((x) => x.ev.event.type === 'rep');
+    expect(repEvents).toHaveLength(2);
+    expect(s.phase).toBe('set');
+    expect(s.paused).toBe(false);
+    expect(s.exerciseIndex).toBe(0);
+    expect(s.setIndex).toBe(0);
+    expect(s.set!.phase).toBe('active');
+    expect(s.set!.count).toBe(2);
+    expect(s.set!.heldMs).toBe(0);
+    expect(s.set!.tracker.kind).toBe('reps');
+    expect(s.set!.waitingForBreak).toBe(false);
+  });
+
+  it('60초 쉬는 시간 25초 뒤 remainingMs 35000, pause 10초 뒤에도 35000, resume 뒤 다시 줄어든다', () => {
+    const d = runner([sq(2, 2, 60)]);
+    d.doSet('squat', 2);
+    expect(d.rr.phase).toBe('rest');
+    const t0 = lastRestStartT(d);
+
+    const a = d.rr.snapshot(t0 + 25000);
+    expect(a.phase).toBe('rest');
+    expect(a.set).toBeNull();
+    expect(a.rest!.totalMs).toBe(60000);
+    expect(Math.abs(a.rest!.remainingMs - 35000)).toBeLessThanOrEqual(1);
+    expect(a.rest!.next).toMatchObject({ exerciseIndex: 0, setIndex: 1, exercise: 'squat' });
+
+    d.tick(t0 + 25000);
+    d.rr.pause(t0 + 25000);
+    const b = d.rr.snapshot(t0 + 35000);
+    expect(b.paused).toBe(true);
+    expect(Math.abs(b.rest!.remainingMs - 35000)).toBeLessThanOrEqual(1);
+
+    d.rr.resume(t0 + 35000);
+    const c = d.rr.snapshot(t0 + 45000);
+    expect(c.paused).toBe(false);
+    expect(Math.abs(c.rest!.remainingMs - 25000)).toBeLessThanOrEqual(1);
+  });
+
+  it('snapshot은 상태를 바꾸지 않는다: phase·이벤트 순서가 같다', () => {
+    const run = (withSnapshots: boolean): string[] => {
+      const d = runner([sq(2, 2, 3)]);
+      const snap = () => {
+        if (withSnapshots) {
+          d.rr.snapshot(d.t + 100000);
+          d.rr.snapshot(-5);
+        }
+      };
+      snap();
+      d.doSet('squat', 2);
+      snap();
+      const ph = d.rr.phase;
+      d.tickUntilRestEnd();
+      snap();
+      d.doSet('squat', 2);
+      snap();
+      return [ph, ...d.log.map((x) => `${x.t}:${x.ev.type}`)];
+    };
+    expect(run(true)).toEqual(run(false));
+  });
+
+  it('t가 lastT보다 이르면 lastT 기준으로 계산한다', () => {
+    const d = runner([sq(2, 2, 60)]);
+    d.doSet('squat', 2);
+    const t0 = lastRestStartT(d);
+    d.tick(t0 + 10000);
+    const early = d.rr.snapshot(t0);
+    expect(Math.abs(early.rest!.remainingMs - 50000)).toBeLessThanOrEqual(1);
+  });
+
+  it('2세트 끝난 뒤 sessionSoFar: sets 2, completed false, id는 sessionId, 진행 중 세트는 제외, toEpoch 적용', () => {
+    const d = runner([sq(3, 2, 3)], (t) => 1_000_000 + t);
+    d.doSet('squat', 2);
+    d.tickUntilRestEnd();
+    d.doSet('squat', 2);
+    d.tickUntilRestEnd();
+    d.frames('squat', [...hold(175, 1000), ...reps(175, 90, 1)]); // 3번째 세트 진행 중
+    const s = d.rr.sessionSoFar(d.t);
+    expect(s.sets).toHaveLength(2);
+    expect(s.completed).toBe(false);
+    expect(s.id).toBe('s1');
+    expect(s.routineId).toBe('r1');
+    expect(s.startedAt).toBe(1_000_000);
+    expect(s.endedAt).toBe(1_000_000 + d.t);
+    expect(s.sets.map((x) => [x.exerciseIndex, x.setIndex])).toEqual([[0, 0], [0, 1]]);
+    // 깊은 복사: 바꿔도 내부 기록이 안 바뀐다
+    s.sets[0]!.count = 99;
+    s.sets[0]!.target = { kind: 'reps', reps: 99 };
+    s.sets[0]!.negativeDescentMs.push(1);
+    expect(d.rr.sessionSoFar(d.t).sets[0]!.count).toBe(2);
+    expect(d.rr.sessionSoFar(d.t).sets[0]!.target).toEqual({ kind: 'reps', reps: 2 });
+
+    d.doSet('squat', 2);
+    const end = sessionOf(d.log);
+    expect(end.id).toBe(s.id);
+    expect(end.sets).toHaveLength(3);
+  });
+
+  it('routineEnd 뒤 snapshot.phase는 done, sessionSoFar는 최종 세션의 복사본', () => {
+    const d = runner([sq(1, 2, 3)]);
+    d.doSet('squat', 2);
+    const fin = sessionOf(d.log);
+    const snap = d.rr.snapshot(d.t);
+    expect(snap.phase).toBe('done');
+    expect(snap.paused).toBe(false);
+    expect(snap.set).toBeNull();
+    expect(snap.rest).toBeNull();
+    const s = d.rr.sessionSoFar(d.t + 99999);
+    expect(s).toEqual(fin);
+    expect(s).not.toBe(fin);
+    expect(s.sets[0]).not.toBe(fin.sets[0]);
+    expect(s.completed).toBe(true);
+  });
+});

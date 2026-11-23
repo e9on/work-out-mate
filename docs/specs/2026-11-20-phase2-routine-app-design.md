@@ -189,6 +189,7 @@ Phase 0에서 갤럭시 S23 앱이 30fps로 동작하고, 횟수·시간을 실�
 - 쉬는 시간 중에는 SetRunner가 세지 않는다. 쉬는 시간이 끝나면 다음 SetRunner가 `waitingReady`로 시작한다. restEnd가 나온 호출의 프레임은 새 세트에 넣지 않는다(준비 자세 판정은 다음 push부터). 운동이 바뀌면 restEnd 뒤에 exerciseStart.
 - 조회: `phase`('set'|'rest'|'done'), `current`({exerciseIndex, setIndex}, 쉬는 시간 중에는 방금 끝난 세트), `paused`(세트 중이면 SetRunner.paused, 쉬는 시간이면 쉬는 시간 일시정지 여부, 끝난 뒤 false)
 - 입력: `push`, `tick`, `pause`, `resume`, `skipExercise`, `skipRest`, `stop`(화면 버튼용)
+- 화면 조회·중간 저장: `snapshot(t)`은 `{phase, paused, exerciseIndex, setIndex, set, rest}`를 돌려준다. `set`은 세트 중일 때만 `{phase, tracker, count, heldMs, waitingForBreak}`(count는 start 이후 센 반복 수, waitingReady·countdown에서는 0)이고, `rest`는 쉬는 시간일 때만 `{remainingMs, totalMs, next}`다. 남은 시간은 일시정지를 반영하며(일시정지 중에는 멈춘 값), 상태를 바꾸지 않고 lastT도 갱신하지 않는다. t가 지금까지 본 시각보다 이르면 그 시각 기준이다. `sessionSoFar(t)`은 기록된 세트만 깊은 복사로 담은 `completed:false` 세션(id는 생성자의 sessionId, endedAt은 toEpoch(t), 진행 중 세트 제외)을 돌려주며, routineEnd의 세션과 id가 같아 중간 저장을 덮어쓴다. routineEnd 뒤에는 최종 세션의 복사본이다. 이를 위해 `SetRunner`에 `count`(start 이후 센 반복 수)와 `heldMs`(매달린 시간, 일시정지 제외) getter를 추가했다.
   - **`skipRest(t)`**: 쉬는 시간을 바로 끝내고 다음 세트로 간다(쉬는 시간이 끝났을 때와 같은 경로라 restEnd, 운동이 바뀌면 exerciseStart). completed에 영향이 없다. 쉬는 시간이 아니면 `[]`.
   - **`skipExercise(t)`**: 지금 운동의 남은 세트를 건너뛰고 다음 운동의 첫 세트로 간다(쉬는 시간 없음). 세트 중이면 반복이 있을 때만 기록한다. 쉬는 시간 중이면 "방금 끝난 운동의 남은 세트"를 건너뛴다(다음 운동을 건너뛰지 않는다). **실제로 건너뛴 세트가 있을 때만** completed가 false가 된다. 운동 사이 쉬는 시간이면 건너뛴 세트가 없어 skipRest와 같다.
   - **일시정지 중에 skipRest·skipExercise를 부르면 일시정지를 풀고 진행한다**(새 세트는 멈추지 않은 상태로 시작).
