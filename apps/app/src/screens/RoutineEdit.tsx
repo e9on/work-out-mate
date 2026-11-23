@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ExerciseId, Routine } from '@wom/core';
 import type { Storage } from '../ports/storage';
 import { EXERCISE_IDS, EXERCISE_NAMES, newRoutine, validateRoutine } from '../domain/validate';
@@ -37,6 +37,10 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
   const [toAdd, setToAdd] = useState<ExerciseId>('squat');
   const [errors, setErrors] = useState<string[]>([]);
   const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  // 새 루틴 id는 한 번만 만든다(저장을 여러 번 눌러도 같은 id로 덮어쓴다).
+  const [id] = useState(() => routine?.id ?? makeId());
 
   const update = (i: number, patch: Partial<Row>) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const move = (i: number, d: -1 | 1) =>
@@ -58,8 +62,24 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
       }),
     );
 
+  /** 진행 중 중복 실행을 막고, 실패하면 오류 문구를 보인 뒤 다시 누를 수 있게 한다. */
+  const guarded = async (op: () => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await op();
+    } catch {
+      setErrors(['저장하지 못했어요. 다시 시도해 주세요.']);
+      busyRef.current = false;
+      setBusy(false);
+      return;
+    }
+    onDone();
+  };
+
   const save = async () => {
-    const base = routine ?? newRoutine(name, nextOrder, now(), makeId());
+    const base = routine ?? newRoutine(name, nextOrder, now(), id);
     const candidate: Routine = {
       ...base,
       name: name.trim(),
@@ -74,14 +94,17 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
     const errs = validateRoutine(candidate);
     setErrors(errs);
     if (errs.length > 0) return;
-    await storage.saveRoutine(candidate);
-    onDone();
+    await guarded(async () => {
+      await storage.saveRoutine(candidate);
+    });
   };
 
   const remove = async () => {
     if (!routine) return;
-    await storage.deleteRoutine(routine.id);
-    onDone();
+    setConfirming(false);
+    await guarded(async () => {
+      await storage.deleteRoutine(routine.id);
+    });
   };
 
   return (
@@ -162,7 +185,7 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
       )}
 
       <div className="edit-footer">
-        <button type="button" className="primary" onClick={save}>
+        <button type="button" className="primary" disabled={busy} onClick={save}>
           저장
         </button>
         <button type="button" onClick={onDone}>

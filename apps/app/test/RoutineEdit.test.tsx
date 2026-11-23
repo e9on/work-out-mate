@@ -151,4 +151,45 @@ describe('RoutineEdit', () => {
     fireEvent.change(screen.getByLabelText('1번 운동'), { target: { value: 'pullup' } });
     expect(screen.getByLabelText('1번 횟수')).toHaveValue(10);
   });
+  it('저장 버튼을 두 번 눌러도 루틴은 1개만 생긴다', async () => {
+    const storage = createMemoryStorage();
+    let n = 0;
+    render(<RoutineEdit storage={storage} nextOrder={0} onDone={() => {}} now={() => 1} makeId={() => `id-${++n}`} />);
+    type('루틴 이름', '아침');
+    addExercise('squat');
+    const save = screen.getByRole('button', { name: '저장' });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    await waitFor(async () => expect((await storage.listRoutines()).length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await storage.listRoutines()).toHaveLength(1);
+  });
+
+  it('저장이 reject되면 오류 문구가 보이고 onDone은 호출되지 않으며 버튼은 다시 눌린다', async () => {
+    const storage = createMemoryStorage();
+    storage.saveRoutine = async () => {
+      throw new Error('fail');
+    };
+    const { onDone } = setup({ storage });
+    type('루틴 이름', '아침');
+    addExercise('squat');
+    fireEvent.click(screen.getByRole('button', { name: '저장' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('저장하지 못했어요. 다시 시도해 주세요.');
+    expect(onDone).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '저장' })).toBeEnabled();
+  });
+
+  it('삭제가 reject되면 오류 문구가 보이고 onDone은 호출되지 않는다', async () => {
+    const storage = createMemoryStorage();
+    storage.deleteRoutine = async () => {
+      throw new Error('fail');
+    };
+    const { onDone } = setup({ routine: existing, storage });
+    fireEvent.click(screen.getByRole('button', { name: '루틴 삭제' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '삭제' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('저장하지 못했어요. 다시 시도해 주세요.');
+    expect(onDone).not.toHaveBeenCalled();
+  });
 });
