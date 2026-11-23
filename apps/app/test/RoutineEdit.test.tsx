@@ -189,7 +189,8 @@ describe('RoutineEdit', () => {
     fireEvent.click(screen.getByRole('button', { name: '루틴 삭제' }));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '삭제' }));
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('저장하지 못했어요. 다시 시도해 주세요.');
+    expect(alert.textContent).toContain('삭제하지 못했어요. 다시 시도해 주세요.');
+    expect(alert.textContent).not.toContain('저장하지 못했어요');
     expect(onDone).not.toHaveBeenCalled();
   });
 });

@@ -12,8 +12,8 @@
     "android:build": "npm run copy-wasm && npm run build && npx cap sync android",
     "typecheck:electron": "tsc -p electron --noEmit",
     "electron:build": "npm run typecheck:electron && node scripts/electron-build.mjs",
-    "electron:dev": "npm run build && npm run electron:build && electron .",
-    "electron:pack": "npm run build && npm run electron:build && node scripts/electron-pack.mjs"
+    "electron:dev": "npm run copy-wasm && npm run build && npm run electron:build && electron .",
+    "electron:pack": "npm run copy-wasm && npm run build && npm run electron:build && node scripts/electron-pack.mjs"
   },
   "dependencies": {
     "@capacitor-community/keep-awake": "^8.0.1",

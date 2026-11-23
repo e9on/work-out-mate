@@ -94,6 +94,29 @@ describe('Workout 화면', () => {
     expect(status(container)).toBe('');
   });
 
+  it('준비 대기 중 waitingForBreak면 "자세를 풀었다가 다시 잡아 주세요"를 보여 주고, 진단 문구보다 먼저다', () => {
+    const hint: RoutineEvent = { type: 'set', exerciseIndex: 0, setIndex: 0, event: { type: 'hint', diagnosis: 'notReady' } };
+    const { container, rerender } = renderWorkout(view({ set: setPart({ setPhase: 'waitingReady', waitingForBreak: true }) }));
+    expect(status(container)).toBe('자세를 풀었다가 다시 잡아 주세요');
+    rerender(view({ set: setPart({ setPhase: 'waitingReady', waitingForBreak: true }), lastEvents: [hint] }));
+    expect(status(container)).toBe('자세를 풀었다가 다시 잡아 주세요');
+    rerender(view({ paused: true, set: setPart({ setPhase: 'waitingReady', waitingForBreak: true }), lastEvents: [] }));
+    expect(status(container)).toBe('일시정지');
+  });
+
+  it('준비 대기 중 마지막 hint 진단 문구가 있으면 "준비 자세를 잡아 주세요"보다 먼저 보여 준다', () => {
+    const hint: RoutineEvent = { type: 'set', exerciseIndex: 0, setIndex: 0, event: { type: 'hint', diagnosis: 'notReady' } };
+    const { container, rerender } = renderWorkout(view({ set: setPart({ setPhase: 'waitingReady' }), lastEvents: [hint] }));
+    expect(status(container)).toBe('옆에서 찍어 주세요');
+    // 다음 렌더(이벤트 없음)에도 기억한다
+    rerender(view({ set: setPart({ setPhase: 'waitingReady' }), lastEvents: [] }));
+    expect(status(container)).toBe('옆에서 찍어 주세요');
+    // active가 되면 지우고, 다시 대기로 오면 기본 문구
+    rerender(view({ set: setPart({ setPhase: 'active' }), lastEvents: [] }));
+    rerender(view({ set: setPart({ setPhase: 'waitingReady' }), lastEvents: [] }));
+    expect(status(container)).toBe('준비 자세를 잡아 주세요');
+  });
+
   it('일시정지 버튼 문구가 바뀌고 각각 pause·resume을 부른다', () => {
     const { cb, container, rerender } = renderWorkout(view());
     fireEvent.click(screen.getByRole('button', { name: '일시정지' }));

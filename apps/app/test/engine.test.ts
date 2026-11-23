@@ -195,8 +195,41 @@ describe('WorkoutEngine: 음성 안내', () => {
     await e.start(video());
     expect(r.doSet(2)).toBe(true);
     expect(r.spoken[0]).toBe('스쿼트, 1세트');
-    const words = r.spoken.filter((s) => ['셋', '둘', '하나', '시작'].includes(s));
+    // 한 호출의 문구는 ", "로 이어 한 번에 말하므로 나눠서 본다
+    const words = r.spoken.flatMap((s) => s.split(', ')).filter((s) => ['셋', '둘', '하나', '시작'].includes(s));
     expect(words).toEqual(['셋', '둘', '하나', '시작', '하나', '둘']);
+  });
+
+  it('목표 도달 묶음(한 번의 push)은 speak 한 번으로 "둘, 목표 달성, 세트 끝, 쉬는 시간 60초"를 말한다', async () => {
+    const r = makeRig([sq(2, 2, 60)]);
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    await e.start(video());
+    expect(r.doSet(2)).toBe(true);
+    expect(r.spoken).toContain('둘, 목표 달성, 세트 끝, 쉬는 시간 60초');
+    expect(r.spoken).not.toContain('쉬는 시간 60초');
+  });
+
+  it('마지막 세트의 목표 도달은 "둘, 목표 달성, 세트 끝, 루틴 완료, 수고했어요"를 한 번에 말한다', async () => {
+    const r = makeRig([sq(1, 2, 0)]);
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    await e.start(video());
+    r.doSet(2);
+    expect(r.spoken.at(-1)).toBe('둘, 목표 달성, 세트 끝, 루틴 완료, 수고했어요');
+  });
+
+  it('문구가 없는 호출(이벤트 없는 tick)에서는 speak를 부르지 않는다', async () => {
+    const speak = vi.fn(async () => 'ok' as const);
+    const r = makeRig([sq(1, 2, 0)], { speech: { speak, cancel() {} } });
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    await e.start(video());
+    r.frame(175); // exerciseStart
+    expect(speak).toHaveBeenCalledTimes(1);
+    r.advance(200 - DT); // 이벤트 없는 tick
+    expect(r.last.lastEvents).toEqual([]);
+    expect(speak).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -263,7 +296,7 @@ describe('WorkoutEngine: 저장', () => {
     expect(r.pose.listeners).toBe(0);
     expect(r.pose.stops).toBe(1);
     expect(r.keepAwake.off).toHaveBeenCalledTimes(1);
-    expect(r.spoken.at(-1)).toBe('루틴 완료, 수고했어요');
+    expect(r.spoken.at(-1)?.endsWith('루틴 완료, 수고했어요')).toBe(true);
   });
 
   it('세트 하나 뒤 dispose(앱 꺼짐 흉내)하면 저장소에 sets 1, completed false 세션이 남는다', async () => {
@@ -290,7 +323,7 @@ describe('WorkoutEngine: 저장', () => {
     expect(r.views.length).toBe(n);
   });
 
-  it('반복 0으로 끝난 세트(그만하기)는 중간 저장하지 않는다', async () => {
+  it('반복 0으로 끝난 세트로 루틴이 끝나면(기록된 세트 0개) 중간 저장도 최종 저장도 하지 않는다', async () => {
     const r = makeRig([sq(2, 2, 30)]);
     const save = vi.spyOn(r.storage, 'saveSession');
     const e = new WorkoutEngine(r.deps);
@@ -299,9 +332,31 @@ describe('WorkoutEngine: 저장', () => {
     r.frames(hold(175, 500));
     e.skipExercise(); // 반복 0인 세트 → routineEnd(다음 운동 없음)
     await flush();
-    // routineEnd 저장 한 번뿐
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0]![0]).toMatchObject({ completed: false, sets: [] });
+    expect(save).not.toHaveBeenCalled();
+    // Summary용 ended는 그대로 설정한다
+    expect(r.last.ended).toMatchObject({ completed: false, sets: [] });
+  });
+
+  it('카메라를 켜기 전에 그만해도 빈 세션을 저장하지 않는다', async () => {
+    const r = makeRig([sq(2, 2, 30)]);
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    await e.stop();
+    expect(r.last.ended).not.toBeNull();
+    expect(await r.storage.listSessions()).toHaveLength(0);
+  });
+
+  it('세트 하나 뒤 그만하면 completed false 세션을 저장한다', async () => {
+    const r = makeRig([sq(2, 2, 30)]);
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    await e.start(video());
+    r.doSet(2);
+    await e.stop();
+    const all = await r.storage.listSessions();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ completed: false });
+    expect(all[0]!.sets).toHaveLength(1);
   });
 
   it('저장이 실패해도 엔진은 멈추지 않고 console.warn만 남긴다', async () => {
@@ -502,7 +557,7 @@ describe('WorkoutEngine: 진행', () => {
     await e.start(video());
     r.doSet(2);
     expect(r.last.phase).toBe('rest');
-    expect(r.spoken).toContain('쉬는 시간 3초');
+    expect(r.spoken.some((s) => s.split(', ').includes('쉬는 시간 3초'))).toBe(true);
     r.advance(3200);
     expect(r.events.some((x) => x.type === 'restEnd')).toBe(true);
     expect(r.last.phase).toBe('set');

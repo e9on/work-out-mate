@@ -34,8 +34,10 @@ const TICK_MS = 200;
  * 카메라 자세 프레임을 RoutineRunner에 흘려 넣고, 음성·저장·화면 켜짐·일시정지를 묶는다.
  * - start: keepAwake.on → pose.start. 성공하면 프레임 구독과 TICK_MS interval을 시작한다.
  *   실패하면 cameraError에 담고 keepAwake.off. 예외는 밖으로 내보내지 않고, 다시 start할 수 있다.
- * - 이벤트마다 phraseFor 문구를 말한다(기다리지 않고 실패는 무시).
- * - 반복이 있는 세트가 끝나면 sessionSoFar를 중간 저장하고, routineEnd면 최종 세션을 저장한 뒤 정리한다.
+ * - 한 호출(push·tick·버튼)에서 나온 문구를 ", "로 이어 speak 한 번으로 말한다(기다리지 않고 실패는 무시).
+ *   음성 구현은 새 문구가 이전 문구를 끊으므로, 묶음 안의 문구가 서로 끊기지 않게 한다. 문구가 없으면 말하지 않는다.
+ * - 반복이 있는 세트가 끝나면 sessionSoFar를 중간 저장하고, routineEnd면 정리한다.
+ *   최종 세션은 기록된 세트가 있을 때만 저장한다(0세트로 그만하면 빈 미완료 세션을 남기지 않는다).
  *   저장은 순서대로 이어서 하고, 실패는 console.warn만 남긴다.
  * - dispose: 저장 없이 정리만 한다(앱 꺼짐 흉내. 중간 저장은 세트마다 이미 했다).
  */
@@ -195,8 +197,10 @@ export class WorkoutEngine {
   private handle(evs: RoutineEvent[]): Promise<void> {
     let end: WorkoutSession | null = null;
     let saveMid = false;
+    const texts: string[] = [];
     for (const e of evs) {
-      this.say(e);
+      const text = phraseFor(e, { routine: this.d.routine });
+      if (text !== null) texts.push(text);
       if (e.type === 'set' && e.event.type === 'finished') {
         const r = e.event.result;
         if (r.count > 0 || r.heldMs > 0) saveMid = true;
@@ -204,9 +208,10 @@ export class WorkoutEngine {
         end = e.session;
       }
     }
+    if (texts.length > 0) this.say(texts.join(', '));
     if (end) {
       this.ended = end;
-      this.save(end);
+      if (end.sets.length > 0) this.save(end);
       this.teardown();
     } else if (saveMid) {
       this.save(this.runner.sessionSoFar(this.d.now()));
@@ -215,9 +220,7 @@ export class WorkoutEngine {
     return this.saving;
   }
 
-  private say(e: RoutineEvent): void {
-    const text = phraseFor(e, { routine: this.d.routine });
-    if (text === null) return;
+  private say(text: string): void {
     try {
       Promise.resolve(this.d.speech.speak(text)).catch(() => undefined);
     } catch {

@@ -31,8 +31,9 @@ export function Workout({ view, routine, pose, getVideo, onPause, onResume, onSk
   let status = '';
   if (view.paused) status = '일시정지';
   else if (set?.setPhase === 'countdown' && set.countdownRemainingMs !== null) status = String(Math.ceil(set.countdownRemainingMs / 1000));
-  else if (set?.setPhase === 'waitingReady') status = '준비 자세를 잡아 주세요';
+  else if (set?.setPhase === 'waitingReady' && set.waitingForBreak) status = '자세를 풀었다가 다시 잡아 주세요';
   else if (hint) status = hint;
+  else if (set?.setPhase === 'waitingReady') status = '준비 자세를 잡아 주세요';
 
   return (
     <section className="workout" aria-label="운동">

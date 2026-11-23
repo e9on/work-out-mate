@@ -14,6 +14,8 @@ export type HomeProps = {
 export function Home({ storage, onStart, onEdit, onHistory }: HomeProps) {
   const [data, setData] = useState<{ routines: Routine[]; sessions: WorkoutSession[] } | null>(null);
   const [error, setError] = useState('');
+  const [moving, setMoving] = useState(false);
+  const movingRef = useRef(false);
   const alive = useRef(true);
 
   const load = useCallback(async () => {
@@ -33,20 +35,31 @@ export function Home({ storage, onStart, onEdit, onHistory }: HomeProps) {
     };
   }, [load]);
 
-  /** 이웃 루틴과 order 값을 바꿔 저장한 뒤 목록을 다시 읽는다. */
+  /**
+   * 이웃 루틴과 자리를 바꾼 화면 순서대로 order를 0..n-1로 모두 다시 매기고, order가 바뀐 루틴만 저장한 뒤 목록을 다시 읽는다.
+   * 전체를 다시 매기므로 order가 겹친 데이터도 바로잡힌다. 처리 중에는 순서 버튼을 막는다.
+   */
   const swap = async (i: number, d: -1 | 1) => {
-    if (!data) return;
-    const a = data.routines[i];
-    const b = data.routines[i + d];
+    if (!data || movingRef.current) return;
+    const list = [...data.routines];
+    const a = list[i];
+    const b = list[i + d];
     if (!a || !b) return;
+    list[i] = b;
+    list[i + d] = a;
+    movingRef.current = true;
+    setMoving(true);
     try {
-      await storage.saveRoutine({ ...a, order: b.order });
-      await storage.saveRoutine({ ...b, order: a.order });
+      for (const [order, r] of list.entries()) {
+        if (r.order !== order) await storage.saveRoutine({ ...r, order });
+      }
       setError('');
     } catch {
       setError('순서를 바꾸지 못했어요. 다시 시도해 주세요.');
     }
     await load();
+    movingRef.current = false;
+    if (alive.current) setMoving(false);
   };
 
   const recommended = data ? recommendNext(data.routines, data.sessions) : null;
@@ -95,10 +108,10 @@ export function Home({ storage, onStart, onEdit, onHistory }: HomeProps) {
                   <button type="button" aria-label={`${r.name} 편집`} onClick={() => onEdit(r)}>
                     편집
                   </button>
-                  <button type="button" aria-label={`${r.name} 위로`} disabled={i === 0} onClick={() => swap(i, -1)}>
+                  <button type="button" aria-label={`${r.name} 위로`} disabled={moving || i === 0} onClick={() => swap(i, -1)}>
                     위로
                   </button>
-                  <button type="button" aria-label={`${r.name} 아래로`} disabled={i === data.routines.length - 1} onClick={() => swap(i, 1)}>
+                  <button type="button" aria-label={`${r.name} 아래로`} disabled={moving || i === data.routines.length - 1} onClick={() => swap(i, 1)}>
                     아래로
                   </button>
                 </div>

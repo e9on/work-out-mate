@@ -63,17 +63,21 @@ class FakeUtterance {
   constructor(public text: string) {}
 }
 
-function fakeSynth(langs: string[]) {
+type FakeVoice = { lang: string; name: string; localService: boolean };
+/** 문자열은 기기 안 음성(localService true)으로 본다 */
+function fakeSynth(langs: Array<string | FakeVoice>) {
   const spoken: string[] = [];
+  const used: unknown[] = [];
   const synth = {
-    getVoices: () => langs.map((lang) => ({ lang, name: lang })),
+    getVoices: () => langs.map((v) => (typeof v === 'string' ? { lang: v, name: v, localService: true } : v)),
     cancel: vi.fn(),
     speak: (u: FakeUtterance) => {
       spoken.push(u.text);
+      used.push(u.voice);
       u.onend?.();
     },
   };
-  return { synth: synth as unknown as SpeechSynthesis, spoken };
+  return { synth: synth as unknown as SpeechSynthesis, spoken, used };
 }
 
 describe('createWebSpeech', () => {
@@ -94,6 +98,22 @@ describe('createWebSpeech', () => {
     const s = createWebSpeech({ synth, Utterance: FakeUtterance as unknown as typeof SpeechSynthesisUtterance });
     await expect(s.speak('하나')).resolves.toBe('ok');
     expect(spoken).toEqual(['하나']);
+  });
+
+  it("ko 음성이 네트워크 음성(localService false)뿐이면 'unsupported'이고 말하지 않는다", async () => {
+    const { synth, spoken } = fakeSynth([{ lang: 'ko-KR', name: 'Google 한국의', localService: false }]);
+    const s = createWebSpeech({ synth, Utterance: FakeUtterance as unknown as typeof SpeechSynthesisUtterance });
+    await expect(s.speak('하나')).resolves.toBe('unsupported');
+    expect(spoken).toEqual([]);
+  });
+
+  it('네트워크 ko 음성이 먼저 있어도 기기 안 ko 음성을 고른다', async () => {
+    const net = { lang: 'ko-KR', name: 'Online (Natural)', localService: false };
+    const local = { lang: 'ko-KR', name: 'Heami', localService: true };
+    const { synth, used } = fakeSynth([net, local]);
+    const s = createWebSpeech({ synth, Utterance: FakeUtterance as unknown as typeof SpeechSynthesisUtterance });
+    await expect(s.speak('하나')).resolves.toBe('ok');
+    expect(used).toEqual([local]);
   });
 });
 

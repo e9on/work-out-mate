@@ -63,14 +63,14 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
     );
 
   /** 진행 중 중복 실행을 막고, 실패하면 오류 문구를 보인 뒤 다시 누를 수 있게 한다. */
-  const guarded = async (op: () => Promise<void>) => {
+  const guarded = async (op: () => Promise<void>, failText: string) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     try {
       await op();
     } catch {
-      setErrors(['저장하지 못했어요. 다시 시도해 주세요.']);
+      setErrors([failText]);
       busyRef.current = false;
       setBusy(false);
       return;
@@ -96,7 +96,7 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
     if (errs.length > 0) return;
     await guarded(async () => {
       await storage.saveRoutine(candidate);
-    });
+    }, '저장하지 못했어요. 다시 시도해 주세요.');
   };
 
   const remove = async () => {
@@ -104,7 +104,7 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
     setConfirming(false);
     await guarded(async () => {
       await storage.deleteRoutine(routine.id);
-    });
+    }, '삭제하지 못했어요. 다시 시도해 주세요.');
   };
 
   return (
