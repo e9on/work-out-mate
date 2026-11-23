@@ -31,6 +31,12 @@ jobs:
         run: npm run typecheck -w packages/core
       - name: core 테스트 (개인 녹화 합격 테스트는 파일이 없으면 건너뜀)
         run: npm test -w packages/core
+      - name: 진짜 앱 테스트 (CSP 빌드 산출물 포함)
+        run: npm test -w apps/app
+      - name: 진짜 앱 타입 검사
+        run: npm run typecheck -w apps/app
+      - name: 진짜 앱 빌드
+        run: npm run build -w apps/app
       - name: 시험용 앱 웹 빌드
         run: npm run build -w apps/spike
       - name: PC 앱(Electron) main/preload 타입 검사·빌드
