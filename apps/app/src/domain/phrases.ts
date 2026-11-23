@@ -1,12 +1,9 @@
 import type { Routine, RoutineEvent, SetEvent } from '@wom/core';
 import { koCount } from './koNumbers';
 import { EXERCISE_NAMES } from './validate';
+import { targetText } from './format';
 
 type Ctx = { routine: Routine };
-
-function targetText(t: { kind: 'reps'; reps: number } | { kind: 'seconds'; seconds: number }): string {
-  return t.kind === 'reps' ? `${t.reps}회` : `${t.seconds}초`;
-}
 
 function setPhrase(e: SetEvent, exerciseIndex: number, ctx: Ctx): string | null {
   switch (e.type) {

@@ -6,6 +6,7 @@ import { Home } from './screens/Home';
 import { RoutineEdit } from './screens/RoutineEdit';
 import { History } from './screens/History';
 import { SessionDetail } from './screens/SessionDetail';
+import { WorkoutFlow, type WorkoutFlowDeps } from './workout/WorkoutFlow';
 
 // 라우터 라이브러리 없이 상태 하나로 화면을 고른다.
 type Screen =
@@ -15,9 +16,9 @@ type Screen =
   | { kind: 'detail'; sessionId: string }
   | { kind: 'workout'; routine: Routine };
 
-export type AppProps = { storage?: Storage };
+export type AppProps = { storage?: Storage; workoutDeps?: WorkoutFlowDeps };
 
-export function App({ storage: injected }: AppProps = {}) {
+export function App({ storage: injected, workoutDeps }: AppProps = {}) {
   const [storage] = useState<Storage>(() => injected ?? createIdbStorage());
   const [screen, setScreen] = useState<Screen>({ kind: 'home' });
   const [nextOrder, setNextOrder] = useState(0);
@@ -44,15 +45,7 @@ export function App({ storage: injected }: AppProps = {}) {
     case 'detail':
       return <SessionDetail storage={storage} sessionId={screen.sessionId} onBack={() => setScreen({ kind: 'history' })} />;
     case 'workout':
-      return (
-        <main className="app">
-          <h1 className="app-title">Work Out Mate</h1>
-          <p>운동 화면 준비 중</p>
-          <button type="button" onClick={home}>
-            홈으로
-          </button>
-        </main>
-      );
+      return <WorkoutFlow key={screen.routine.id} routine={screen.routine} storage={storage} onHome={home} deps={workoutDeps} />;
     default:
       return (
         <Home
