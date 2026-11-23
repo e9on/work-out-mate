@@ -304,3 +304,10 @@ type WorkoutSession = { id: string; routineId: string; routineName: string; star
 - **(j) CSP를 앱으로 옮긴다.** 개발 모드 완화(`style-src 'unsafe-inline'`, `connect-src ws: wss:`)를 넣는 replace가 실제로 적용되는지 검증한다. `base-uri`·`form-action`을 정한다. 자가 점검의 CSP 위반 수를 자동으로 판정한다.
 - **(k) 루틴 편집 입력 범위 검증은 앱이 한다.** 코어는 범위를 검증하지 않는다(세트 수는 floor, 음수는 0).
 - **(l) 실기기 확인 목록.** S23에서 CSP 동작, 벤치·턱걸이 실측(#6, #9), 푸시업 녹화 추가.
+
+### 10.1 결정 (2026-11-23)
+- **(c) backToReady 반복 [확정]**: "다시 자세를 잡아 주세요" 안내는 한 번만 한다. 그 뒤에는 준비 자세가 **한 번 흐트러졌다가 다시 잡혀야** 카운트다운을 다시 시작한다(서 있기만 해서는 다시 시작하지 않음).
+- **(i) 중간 저장 [확정]**: 세트가 끝날 때마다 진행 중인 세션을 저장한다. 앱이 도중에 꺼지면 그 세션은 `completed: false`(미완료)로 남는다.
+- **(f) 백그라운드 [확정]**: 운동 중 다른 앱으로 나가거나 화면이 꺼지면 자동 일시정지한다. 돌아오면 "다시 시작" 버튼으로 이어 간다.
+- **(a) [제안]** hint는 같은 진단이 1500ms 이어질 때 낸다. waitingReady에 들어간 뒤 3000ms 동안은 notReady를 내지 않는다.
+- **(b) [제안]** resume하면 idle·noStart 기준 시각을 resume 시각으로 다시 잡는다(`idleFrom = max(idleFrom + d, resumeT)`).
