@@ -44,7 +44,9 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
       const j = i + d;
       if (j < 0 || j >= rs.length) return rs;
       const next = [...rs];
-      [next[i], next[j]] = [next[j], next[i]];
+      const a = next[i]!;
+      next[i] = next[j]!;
+      next[j] = a;
       return next;
     });
   const changeExercise = (i: number, id: ExerciseId) =>
