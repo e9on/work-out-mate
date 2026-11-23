@@ -2,7 +2,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { relaxCspHtml } from '../csp';
+import { relaxCspHtml } from '../csp.ts';
+import { findStyleViolations } from './styleScan';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,8 +30,11 @@ describe('CSP 빌드 산출물', () => {
 
   it('dev 완화가 빌드 산출물에는 들어가지 않는다', () => {
     const html = readFileSync(join(ROOT, 'dist/index.html'), 'utf8');
-    expect(html).not.toContain('unsafe-inline');
-    expect(html).not.toContain('ws:');
+    const csp = cspOf(html) ?? '';
+    const connectSrc = csp.split(';').map((d) => d.trim()).find((d) => d.startsWith('connect-src')) ?? '';
+    expect(csp).not.toContain('unsafe-inline');
+    expect(connectSrc.split(/\s+/)).not.toContain('ws:');
+    expect(connectSrc.split(/\s+/)).not.toContain('wss:');
   });
 });
 
@@ -55,16 +59,18 @@ describe('relaxCspHtml (dev 전용 완화)', () => {
   });
 });
 
-describe('src에서 style 속성 금지', () => {
-  function tsxFiles(dir: string): string[] {
+describe('src에서 인라인 스타일 금지', () => {
+  function sourceFiles(dir: string): string[] {
     return readdirSync(dir).flatMap((n) => {
       const p = join(dir, n);
-      return statSync(p).isDirectory() ? tsxFiles(p) : p.endsWith('.tsx') ? [p] : [];
+      return statSync(p).isDirectory() ? sourceFiles(p) : /\.(ts|tsx|js|jsx)$/.test(n) ? [p] : [];
     });
   }
 
-  it('.tsx 안에 style={ 또는 style=" 이 없다', () => {
-    const bad = tsxFiles(join(ROOT, 'src')).filter((f) => /style\s*=\s*(\{|")/.test(readFileSync(f, 'utf8')));
+  it('src/**/*.{ts,tsx,js,jsx}에 인라인 스타일 패턴이 없다', () => {
+    const bad = sourceFiles(join(ROOT, 'src'))
+      .map((f) => [f, findStyleViolations(readFileSync(f, 'utf8'))] as const)
+      .filter(([, v]) => v.length > 0);
     expect(bad).toEqual([]);
   });
 });
