@@ -217,6 +217,11 @@ describe('카메라 오류', () => {
 });
 
 describe('Placement', () => {
+  it('paused인 view에서는 배치 안내를 그리지 않는다', () => {
+    render(<Placement view={view({ paused: true, set: setPart({ setPhase: 'waitingReady' }) })} routine={ROUTINE} />);
+    expect(screen.queryByText('옆에서, 온몸이 보이게')).toBeNull();
+  });
+
   it('운동이 시작되면 배치 안내를 보여 주고, countdown·active가 되면 닫힌다. 다음 운동에서 다시 열린다', () => {
     const r = render(<Placement view={view({ set: setPart({ setPhase: 'waitingReady' }) })} routine={ROUTINE} />);
     expect(screen.getByText('옆에서, 온몸이 보이게')).toBeInTheDocument();
@@ -250,6 +255,22 @@ describe('WorkoutFlow: 화면 선택', () => {
     expect(fw.pose.videos).toHaveLength(1);
     expect(fw.pose.videos[0]).toBeInstanceOf(HTMLVideoElement);
     expect(screen.getByText('스쿼트 1/2세트')).toBeInTheDocument();
+    expect(screen.getByText('옆에서, 온몸이 보이게')).toBeInTheDocument();
+  });
+
+  it('일시정지 중에는 배치 안내를 그리지 않아 "다시 시작" 버튼이 보이고, 다시 시작하면 안내가 돌아온다', async () => {
+    const fw = makeFakeWorkout();
+    render(<WorkoutFlow routine={squat2} storage={createMemoryStorage()} onHome={vi.fn()} deps={fw.deps} />);
+    await flush();
+    expect(screen.getByText('옆에서, 온몸이 보이게')).toBeInTheDocument();
+    act(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    expect(screen.getByRole('button', { name: '다시 시작' })).toBeInTheDocument();
+    expect(screen.queryByText('옆에서, 온몸이 보이게')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '다시 시작' }));
     expect(screen.getByText('옆에서, 온몸이 보이게')).toBeInTheDocument();
   });
 

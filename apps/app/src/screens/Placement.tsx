@@ -12,7 +12,7 @@ export const isBarExercise = (id: ExerciseId) => BAR_EXERCISES.has(id);
 /**
  * 운동별 카메라 배치 안내. Workout 화면 위에 겹쳐 보인다.
  * - 처음과 운동이 바뀔 때(exerciseIndex 변화 또는 lastEvents의 exerciseStart) 열린다.
- * - 세트가 countdown이나 active가 되면 닫힌다. "확인"으로 직접 닫을 수도 있다.
+ * - 세트가 countdown이나 active가 되면 닫힌다. 일시정지 중에는 그리지 않는다. "확인"으로 직접 닫을 수도 있다.
  * - 쉬는 시간에도 마운트를 유지해야 같은 운동의 다음 세트에서 다시 열리지 않는다(쉬는 시간에는 그리지 않는다).
  */
 export function Placement({ view, routine }: PlacementProps) {
@@ -33,7 +33,8 @@ export function Placement({ view, routine }: PlacementProps) {
   const started = view.set?.setPhase === 'countdown' || view.set?.setPhase === 'active';
   if (open && started) setOpen(false);
 
-  if (!open || started || view.phase !== 'set') return null;
+  // 일시정지 중에는 그리지 않는다("다시 시작" 버튼을 가리지 않게). open은 그대로 두어 다시 시작한 뒤 waitingReady면 다시 보인다.
+  if (!open || started || view.paused || view.phase !== 'set') return null;
   const ex = routine.exercises[view.exerciseIndex];
   if (!ex) return null;
   const bar = isBarExercise(ex.exercise);
