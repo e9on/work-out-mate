@@ -66,3 +66,83 @@ body {
   flex-direction: column;
   gap: 8px;
 }
+
+.home button,
+.history button,
+.session-detail button {
+  font: inherit;
+  padding: 8px 12px;
+  min-height: 40px;
+}
+.recommend {
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+}
+.recommend h2 {
+  margin: 4px 0 12px;
+}
+.label {
+  margin: 0;
+  color: #aaa;
+}
+.routine-list,
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.routine-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid #333;
+  padding: 8px 0;
+}
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.home-footer {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+}
+.error-text {
+  color: #ff8a8a;
+}
+.history-item {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  margin: 4px 0;
+}
+.history-name {
+  flex: 1;
+}
+.badge.done {
+  color: #8fe28f;
+}
+.badge.undone {
+  color: #ffb86b;
+}
+.table-wrap {
+  overflow-x: auto;
+}
+.set-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.set-table th,
+.set-table td {
+  border: 1px solid #444;
+  padding: 6px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
