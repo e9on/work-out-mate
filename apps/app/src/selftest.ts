@@ -3,6 +3,7 @@
 //  (a) 일부러 일으킨 CSP 위반(인라인 스크립트·eval·외부 이미지·외부 fetch)이 securitypolicyviolation 으로 잡히는지
 //  (b) MediaPipe PoseLandmarker를 app:// 자산(wasm·lite 모델)으로 실제로 만들 수 있는지
 //  (c) 렌더러의 외부 요청이 모두 실패하는지. CSP가 적용되지 않는 app:// 워커에서도 시도해 main 차단 목록에 잡히게 한다.
+//  (d) 운동 중 화면 켜짐(navigator.wakeLock.request('screen'))이 성공하는지
 import { blockTelemetry, createLandmarker } from './platform/mediapipePose';
 
 /** main이 차단 목록에서 찾는 표식(electron/main.ts의 PROBE_MARK와 같다) */
@@ -77,6 +78,18 @@ async function makeLandmarker(): Promise<{ ok: boolean; detail: string }> {
   }
 }
 
+/** (d) 화면 wake lock을 잡았다가 바로 놓는다(실제 앱의 platform/keepAwake.ts와 같은 API). */
+async function tryWakeLock(): Promise<{ ok: boolean; detail: string }> {
+  if (!navigator.wakeLock) return { ok: false, detail: 'navigator.wakeLock 없음' };
+  try {
+    const s = await navigator.wakeLock.request('screen');
+    await s.release();
+    return { ok: true, detail: 'screen 잡기·놓기 성공' };
+  } catch (e) {
+    return { ok: false, detail: errText(e) };
+  }
+}
+
 export async function runSelfTest(): Promise<void> {
   const cspDetails: string[] = [];
   const onViolation = (ev: SecurityPolicyViolationEvent): void => {
@@ -84,6 +97,7 @@ export async function runSelfTest(): Promise<void> {
   };
   document.addEventListener('securitypolicyviolation', onViolation);
   let landmarker = { ok: false, detail: '실행 안 됨' };
+  let wakeLock = { ok: false, detail: '실행 안 됨' };
   const probeDetails: string[] = [];
   try {
     say(`href=${location.href} secure=${String(isSecureContext)}`);
@@ -91,6 +105,7 @@ export async function runSelfTest(): Promise<void> {
     probeDetails.push(await probeFromDocument());
     probeDetails.push(await probeFromWorker());
     landmarker = await makeLandmarker();
+    wakeLock = await tryWakeLock();
     await wait(300); // 위반 이벤트는 비동기로 온다
   } catch (e) {
     say(`점검 중 예외: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`);
@@ -104,6 +119,8 @@ export async function runSelfTest(): Promise<void> {
     landmarkerDetail: landmarker.detail,
     probesRejected: probeDetails.length === 2 && probeDetails.every((d) => d.includes('실패(정상)')),
     probeDetails,
+    wakeLock: wakeLock.ok,
+    wakeLockDetail: wakeLock.detail,
   };
   console.log(`[SELFTEST] result ${JSON.stringify(result)}`);
 }

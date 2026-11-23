@@ -80,23 +80,29 @@ function registerAppProtocol(): void {
   });
 }
 
-/** 카메라(video)만 허용하고 나머지 권한은 전부 거부한다. 요청한 쪽과 창 모두 앱 origin이어야 한다. */
+/**
+ * 카메라(video)와 화면 켜짐(screen wake lock)만 허용하고 나머지 권한은 전부 거부한다. 요청한 쪽과 창 모두 앱 origin이어야 한다.
+ * 화면 켜짐: 운동 중 화면이 꺼지지 않게 src/platform/keepAwake.ts가 navigator.wakeLock.request('screen')을 부른다.
+ * Electron 45는 이 요청을 permission 이름 'screen-wake-lock'으로 넘긴다(자가 점검 로그로 확인).
+ */
+const WAKE_LOCK = 'screen-wake-lock';
 function setupPermissions(): void {
   const ses = session.defaultSession;
   ses.setPermissionRequestHandler((wc, permission, callback, details) => {
     const types = (details as { mediaTypes?: string[] }).mediaTypes ?? [];
-    const ok =
-      permission === 'media' &&
-      isAppOrigin(details.requestingUrl) &&
-      isAppOrigin(wc.getURL()) &&
-      types.length > 0 &&
-      types.every((t) => t === 'video');
+    const fromApp = isAppOrigin(details.requestingUrl) && isAppOrigin(wc.getURL());
+    const video = permission === 'media' && types.length > 0 && types.every((t) => t === 'video');
+    const ok = fromApp && (video || (permission as string) === WAKE_LOCK);
     log(`[perm] request ${permission} ${JSON.stringify(types)} -> ${ok ? 'allow' : 'deny'}`);
     callback(ok);
   });
   ses.setPermissionCheckHandler((_wc, permission, requestingOrigin, details) => {
     const mediaType = (details as { mediaType?: string }).mediaType;
-    return permission === 'media' && isAppOrigin(requestingOrigin) && mediaType === 'video';
+    const ok =
+      isAppOrigin(requestingOrigin) &&
+      ((permission === 'media' && mediaType === 'video') || (permission as string) === WAKE_LOCK);
+    log(`[perm] check ${permission} ${requestingOrigin} ${mediaType ?? ''} -> ${ok ? 'allow' : 'deny'}`);
+    return ok;
   });
   // USB·HID·시리얼 등 장치 접근은 쓰지 않는다.
   ses.setDevicePermissionHandler(() => false);
@@ -165,6 +171,8 @@ type SelftestResult = {
   landmarkerDetail: string;
   probesRejected: boolean;
   probeDetails: string[];
+  wakeLock: boolean;
+  wakeLockDetail: string;
 };
 
 /** 렌더러가 보낸 결과와 main이 본 네트워크 기록을 합쳐 판정한다. 실패 사유 목록을 돌려준다(빈 배열이면 통과). */
@@ -174,11 +182,16 @@ function judge(r: SelftestResult): string[] {
   if (r.landmarker !== true) fails.push(`랜드마커 생성 실패: ${r.landmarkerDetail}`);
   if (r.probesRejected !== true) fails.push(`렌더러의 외부 요청 중 성공한 것이 있음: ${JSON.stringify(r.probeDetails)}`);
   if (!blocked.some((u) => u.includes(PROBE_MARK))) fails.push(`main 차단 목록에 점검용 외부 요청(${PROBE_MARK})이 없음`);
+  if (r.wakeLock !== true) fails.push(`화면 wake lock 실패: ${r.wakeLockDetail}`);
   if (sentExternal.length !== 0) fails.push(`실제로 나간 외부 요청 ${sentExternal.length}건: ${JSON.stringify(sentExternal)}`);
   return fails;
 }
 
+/** 자가 점검 판정이 끝났는지. 끝나기 전에 창이 닫히면 실패(exit 1)로 끝낸다. */
+let selftestJudged = false;
+
 function finishSelftest(raw: string): void {
+  selftestJudged = true;
   let r: SelftestResult;
   try {
     r = JSON.parse(raw) as SelftestResult;
@@ -190,6 +203,7 @@ function finishSelftest(raw: string): void {
   log(`[selftest] CSP 위반 ${r.cspViolations}건: ${JSON.stringify(r.cspDetails)}`);
   log(`[selftest] 랜드마커: ${r.landmarker ? '성공' : '실패'} (${r.landmarkerDetail})`);
   log(`[selftest] 렌더러 외부 요청: ${JSON.stringify(r.probeDetails)}`);
+  log(`[selftest] 화면 wake lock: ${r.wakeLock ? '성공' : '실패'} (${r.wakeLockDetail})`);
   log(`[selftest] main 차단 ${blocked.length}건: ${JSON.stringify(blocked)}`);
   log(`[selftest] 실제로 나간 외부 요청 ${sentExternal.length}건`);
   const fails = judge(r);
@@ -265,4 +279,11 @@ void app.whenReady().then(() => {
   }
 });
 
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => {
+  if (SELFTEST && !selftestJudged) {
+    log('[selftest] FAIL 판정 전에 창이 닫힘');
+    app.exit(1);
+    return;
+  }
+  app.quit();
+});
