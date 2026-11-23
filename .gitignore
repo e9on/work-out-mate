@@ -7,3 +7,5 @@ apps/spike/public/mediapipe/
 apps/app/public/mediapipe/
 apps/spike/out/
 apps/spike/electron-dist/
+apps/app/out/
+apps/app/electron-dist/

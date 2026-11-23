@@ -41,6 +41,8 @@ jobs:
         run: npm run build -w apps/spike
       - name: PC 앱(Electron) main/preload 타입 검사·빌드
         run: npm run electron:build -w apps/spike
+      - name: 진짜 앱 PC(Electron) main/preload 타입 검사·빌드
+        run: npm run electron:build -w apps/app
 
   android:
     name: Android APK 빌드

@@ -57,7 +57,7 @@ function detect(l: PoseLandmarker, video: HTMLVideoElement, t: number): PoseFram
   return { t, image: img.map(conv), world: wld.map(conv) };
 }
 
-async function createLandmarker(): Promise<{ landmarker: PoseLandmarker; delegate: Delegate }> {
+export async function createLandmarker(): Promise<{ landmarker: PoseLandmarker; delegate: Delegate }> {
   // 무거운 라이브러리는 운동을 시작할 때만 불러온다(홈 화면 번들에 넣지 않는다).
   const { FilesetResolver, PoseLandmarker } = await import('@mediapipe/tasks-vision');
   const fileset = await FilesetResolver.forVisionTasks(WASM_DIR);
