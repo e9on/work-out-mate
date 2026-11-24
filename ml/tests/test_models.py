@@ -98,21 +98,26 @@ class TrapSplit:
         return len(self._get())
 
 
-def test_train_model_never_touches_test_splits_while_training(tmp_path, monkeypatch):
+def test_train_model_never_touches_test_splits(tmp_path):
+    # R15: train_model은 test 분할을 전혀 읽지 않는다(학습 중에도, 끝난 뒤에도).
     data = _data()
     traps = [TrapSplit(data[k]) for k in ("test_ec3d", "test_own")]
     data["test_ec3d"], data["test_own"] = traps
-    orig_fit = tr.fit
-
-    def fit_then_open(*a, **kw):
-        out = orig_fit(*a, **kw)
-        for t in traps:
-            t.open = True
-        return out
-
-    monkeypatch.setattr(tr, "fit", fit_then_open)
     res = tr.train_model(SmallGRU(HEADS, hidden=16), data, CFG, seed=0, out_dir=tmp_path)
-    assert {"val", "test_ec3d", "test_own"} <= set(res)
+    assert set(res) == {"exercise", "seed", "threshold", "train_info", "val"}
+    assert not (tmp_path / "metrics.json").exists()
+    saved = json.loads((tmp_path / "val_metrics.json").read_text(encoding="utf8"))
+    assert "test_ec3d" not in saved and "test_own" not in saved
+
+
+def test_final_eval_writes_test_metrics_to_file_only(tmp_path):
+    data = _data()
+    model = SmallGRU(HEADS, hidden=16)
+    res = tr.train_model(model, data, CFG, seed=0, out_dir=tmp_path)
+    out = tr.final_eval(model, data, CFG, res, tmp_path)
+    assert isinstance(out, type(tmp_path)) and out == tmp_path / "metrics.json"  # 지표 dict를 돌려주지 않음
+    saved = json.loads(out.read_text(encoding="utf8"))
+    assert {"val", "test_ec3d", "test_own", "train_info"} <= set(saved)
 
 
 @pytest.mark.parametrize("split", ["train", "val"])
@@ -132,12 +137,14 @@ def test_fit_signature_has_no_test_access():
 
 
 def test_train_model_outputs_and_metrics(tmp_path):
-    res = tr.train_model(SmallGRU(HEADS, hidden=16), _data(), CFG, seed=0, out_dir=tmp_path)
+    data = _data()
+    model = SmallGRU(HEADS, hidden=16)
+    res = tr.train_model(model, data, CFG, seed=0, out_dir=tmp_path)
     info = res["train_info"]
     assert info["stopped_by"] in ("early_stop", "max_epochs")
     assert 1 <= info["best_epoch"] <= info["epochs_run"] <= CFG["max_epochs"]
     assert (tmp_path / "model.pt").exists()
-    saved = json.loads((tmp_path / "metrics.json").read_text(encoding="utf8"))
+    saved = json.loads(tr.final_eval(model, data, CFG, res, tmp_path).read_text(encoding="utf8"))
     assert saved["test_ec3d"]["n"] == 10
     assert set(saved["test_ec3d"]["by_yaw"]) == {"0", "30", "45", "60", "90"}
     assert saved["test_ec3d"]["by_yaw"]["45"]["n"] == 2
@@ -150,14 +157,26 @@ def test_train_model_outputs_and_metrics(tmp_path):
 
 def test_no_val_samples_uses_fixed_epochs(tmp_path):
     cfg = {**CFG, "exercise": "lunge"}
-    res = tr.train_model(SmallGRU(HEADS, hidden=16), _data(val_ex=("squat",)), cfg, seed=0,
-                         out_dir=tmp_path)
+    data = _data(val_ex=("squat",))
+    model = SmallGRU(HEADS, hidden=16)
+    res = tr.train_model(model, data, cfg, seed=0, out_dir=tmp_path)
     info = res["train_info"]
     assert info["stopped_by"] == "fixed_epochs"
     assert info["epochs_run"] == 3 and info["best_epoch"] == 3
     assert res["val"] is None
-    assert res["test_own"] is None  # 본인 녹화엔 런지가 없음
-    assert res["test_ec3d"]["n"] == 10
+    saved = json.loads(tr.final_eval(model, data, cfg, res, tmp_path).read_text(encoding="utf8"))
+    assert saved["test_own"] is None  # 본인 녹화엔 런지가 없음
+    assert saved["test_ec3d"]["n"] == 10
+
+
+def test_fit_rejects_test_marker_in_other_exercise_rows(tmp_path):
+    # 스쿼트를 학습할 때 런지 행에 있는 표식도 잡는다
+    data = _data()
+    X, Y, meta = data["train"]
+    i = next(k for k, m in enumerate(meta) if m["exercise"] == "lunge")
+    meta[i] = {**meta[i], "source": "own"}
+    with pytest.raises(ValueError):
+        tr.train_model(SmallGRU(HEADS, hidden=16), data, CFG, seed=0, out_dir=tmp_path)
 
 
 def test_same_seed_same_result(tmp_path):

@@ -4,7 +4,7 @@
 데이터 약속: data = {"train", "val", "test_ec3d", "test_own"} 각 값은 dataset.build_arrays의 (X, Y, meta).
 
 평가 오염 방지(가장 중요)
-- 학습(`fit`)은 train·val만 인자로 받는다. test 분할은 fit이 끝난 뒤 `evaluate`에서만 읽는다.
+- 학습(`fit`)·`train_model`은 test 분할을 읽지 않는다. test는 `final_eval`에서만 읽는다.
 - fit은 train·val 메타를 다시 검사해, 본인 녹화(source="own")나 EC3D 피험자 4가 섞여 있으면 ValueError.
 - 조기 종료·체크포인트 선택은 val 손실로만. 임계값은 0.5 고정(고르지 않음).
 
@@ -14,8 +14,10 @@ val 샘플이 없으면(런지·플랭크: EC3D뿐이고 피험자 1~3이 모두
 마지막 가중치를 쓴다.
 
 실행(ml 폴더에서): python -m wom_ml.train --exercise squat --seeds 0 1 2
-결과: runs/small/seed{N}/metrics.json(집계 지표만), runs/small/seed{N}/model.pt, runs/small/summary.json.
-터미널에도 집계만 출력한다(개인 녹화 좌표·샘플별 예측 없음).
+결과: runs/small/seed{N}/val_metrics.json(train_model), runs/small/seed{N}/metrics.json(final_eval, test 포함),
+runs/small/seed{N}/model.pt, runs/small/summary.json. 모두 집계 지표만.
+R15: train_model은 val만 평가·반환한다. test는 final_eval이 학습 뒤 한 번만 계산해 파일에만 쓴다.
+터미널에는 val 지표만 출력한다(test 숫자를 보고 하이퍼파라미터를 고르는 사람 경로 오염 방지).
 """
 from __future__ import annotations
 
@@ -53,7 +55,7 @@ DEFAULT_CFG: dict = {
     "min_delta": 1e-4,
     # val이 없는 운동의 고정 epoch 수(R9). 모든 시드 공통 상수, test 분할은 보지 않고 정했다.
     # 근거: 스쿼트(같은 SmallGRU·학습률·pos_weight="auto")의 Zenodo val 조기 종료 최적 epoch가
-    # 시드 0·1·2에서 4·9·5였다(task-6-report). 가장 큰 값 근처로 올려 10. 런지·플랭크 train 샘플 수
+    # 시드 0·1·2에서 4·9·5(수정 1회차 재학습에서 4·9·4)였다(task-6-report). 가장 큰 값 근처로 올려 10. 런지·플랭크 train 샘플 수
     # (950·780)가 스쿼트(1362)와 같은 자릿수라 그대로 쓴다. 방식 B는 자기 cfg에서 따로 정한다.
     "fixed_epochs": {"lunge": 10, "plank": 10},
     # None이면 보통 BCE. "auto"면 train 라벨의 칸별 음성/양성 비율(train만으로 계산)을 pos_weight로.
@@ -135,10 +137,12 @@ def fit(model, train, val, cfg: dict, seed: int, out_dir: Path) -> dict:
     """
     cfg = {**DEFAULT_CFG, **cfg}
     ex, device = cfg["exercise"], torch.device(cfg["device"])
+    # 그 운동 행만이 아니라 분할의 모든 메타를 검사(리뷰 Minor)
+    assert_not_test(train[2], "train")
+    if val is not None:
+        assert_not_test(val[2], "val")
     Xtr, ytr, mtr = select(train, ex)
     Xva, yva, mva = select(val, ex)
-    assert_not_test(mtr, "train")
-    assert_not_test(mva, "val")
     if len(Xtr) == 0:
         raise ValueError(f"train에 {ex} 샘플이 없음")
     has_val = len(Xva) > 0
@@ -226,23 +230,36 @@ def evaluate(model, split, cfg: dict) -> dict | None:
 
 
 def train_model(model, data: dict, cfg: dict, seed: int, out_dir: Path) -> dict:
-    """학습(fit: train·val만) → 끝난 뒤 val·test_ec3d·test_own 평가 → out_dir/metrics.json.
+    """학습(fit: train·val만) → val만 평가 → out_dir/val_metrics.json. test 분할은 읽지 않는다(R15).
 
+    반환: {exercise, seed, threshold, train_info, val}. 하이퍼파라미터 선택 실행은 이것만 쓴다.
+    test 지표는 학습이 다 끝난 뒤 final_eval로 한 번만, 파일에만 남긴다.
     모델 초기값을 시드로 정하려면 모델을 만들기 전에 set_seed(seed)를 부른다(여기선 학습 순서만 고정).
     """
     cfg = {**DEFAULT_CFG, **cfg}
     set_seed(seed)
     info = fit(model, data["train"], data.get("val"), cfg, seed, out_dir)
-    # ---- 여기부터 학습 끝. test 분할은 이 아래에서만 읽는다.
-    res = {
-        "exercise": cfg["exercise"], "seed": seed, "threshold": THRESHOLD, "train_info": info,
-        "val": evaluate(model, data.get("val"), cfg),
-        "test_ec3d": evaluate(model, data.get("test_ec3d"), cfg),
-        "test_own": evaluate(model, data.get("test_own"), cfg),
-    }
+    res = {"exercise": cfg["exercise"], "seed": seed, "threshold": THRESHOLD, "train_info": info,
+           "val": evaluate(model, data.get("val"), cfg)}
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    (Path(out_dir) / "metrics.json").write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf8")
+    (Path(out_dir) / "val_metrics.json").write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf8")
     return res
+
+
+def final_eval(model, data: dict, cfg: dict, train_result: dict, out_dir: Path) -> Path:
+    """최종 평가(학습·선택이 모두 끝난 뒤 한 번만): test_ec3d·test_own 지표를 out_dir/metrics.json에 쓴다.
+
+    test 지표는 반환하지 않고 파일 경로만 돌려준다(터미널에 test 숫자를 찍지 않게 — R15).
+    metrics.json = train_result(val 포함) + test_ec3d + test_own.
+    """
+    cfg = {**DEFAULT_CFG, **cfg}
+    res = {**train_result,
+           "test_ec3d": evaluate(model, data.get("test_ec3d"), cfg),
+           "test_own": evaluate(model, data.get("test_own"), cfg)}
+    out = Path(out_dir) / "metrics.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf8")
+    return out
 
 
 # ---------------------------------------------------------------- 실제 데이터 실행
@@ -272,7 +289,7 @@ def summarize(results: list[dict]) -> dict:
     s: dict = {"exercise": ex, "seeds": [r["seed"] for r in results],
                "best_epoch": [r["train_info"]["best_epoch"] for r in results]}
     for split in ("val", "test_ec3d", "test_own"):
-        if results[0][split] is None:
+        if results[0].get(split) is None:
             continue
         d = {f"{c}_f1": _mean_std([r[split]["per_error"][c]["f1"] for r in results]) for c in names}
         key = "app_style_rule_columns" if ex in RULE_COLUMNS else "app_style"
@@ -295,23 +312,23 @@ def main(argv=None):
     data = build_data()
     heads = {ex: len(c) for ex, c in HEAD_LABELS.items()}
     cfg = {**DEFAULT_CFG, "exercise": a.exercise}
-    results = []
+    finals = []
     for seed in a.seeds:
         set_seed(seed)
         model = SmallGRU(heads, hidden=a.hidden)
         r = train_model(model, data, cfg, seed, a.out / f"seed{seed}")
-        results.append(r)
-        i = r["train_info"]
+        path = final_eval(model, data, cfg, r, a.out / f"seed{seed}")
+        finals.append(json.loads(path.read_text(encoding="utf8")))
+        i, v = r["train_info"], r["val"]
         line = f"seed {seed}: epochs {i['epochs_run']} best {i['best_epoch']} ({i['stopped_by']}, {i['seconds']}s)"
-        for split in ("test_ec3d", "test_own"):
-            if r[split] is not None:
-                f1 = " ".join(f"{c}={v['f1']:.3f}" for c, v in r[split]["per_error"].items())
-                line += f" | {split} F1 {f1}"
-        print(line)
-    s = summarize(results)
+        if v is not None:
+            f1 = " ".join(f"{c}={m['f1']:.3f}" for c, m in v["per_error"].items())
+            line += f" | val loss {v['loss']:.4f} F1 {f1}"
+        print(line)  # 터미널에는 val만. test 지표는 metrics.json·summary.json 파일에만(R15).
+    s = summarize(finals)
     (a.out / "summary.json").write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding="utf8")
-    print(json.dumps(s, ensure_ascii=False, indent=2))
-
+    print(f"val 요약: {json.dumps(s.get('val'), ensure_ascii=False)}")
+    print(f"test 지표는 파일에만 저장: {a.out}/seed*/metrics.json, {a.out}/summary.json")
 
 if __name__ == "__main__":
     main()

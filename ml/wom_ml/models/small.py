@@ -13,8 +13,12 @@ class SmallGRU(nn.Module):
     def __init__(self, heads: dict[str, int], hidden: int = 128, dropout: float = 0.2):
         super().__init__()
         self.embed = nn.Sequential(nn.Linear(17 * 3, hidden), nn.LayerNorm(hidden), nn.GELU())
-        self.gru = nn.GRU(hidden, hidden, num_layers=2, batch_first=True, bidirectional=True,
-                          dropout=dropout)
+        # 양방향 GRU 2층 + 층 사이 dropout. nn.GRU(num_layers=2, dropout>0)를 쓰지 않고 풀어 쓴 이유:
+        # 이 PC(Windows, torch 2.11+cu126, cuDNN 9.10)에서 cuDNN RNN 내장 dropout을 한 번이라도 쓰면
+        # 계산은 끝까지 되지만 프로세스 종료 코드가 127이 된다(os._exit(0)로도 동일, Task 6 수정 1회차에서 확인).
+        # 계산은 같다: 1층 출력에 dropout → 2층 입력.
+        self.gru1 = nn.GRU(hidden, hidden, batch_first=True, bidirectional=True)
+        self.gru2 = nn.GRU(2 * hidden, hidden, batch_first=True, bidirectional=True)
         self.drop = nn.Dropout(dropout)
         self.heads = nn.ModuleDict({ex: nn.Linear(4 * hidden, n) for ex, n in heads.items()})
 
@@ -22,6 +26,7 @@ class SmallGRU(nn.Module):
         if exercise not in self.heads:
             raise KeyError(f"머리가 없는 운동: {exercise}")
         B, T = x.shape[:2]
-        h, _ = self.gru(self.embed(x.reshape(B, T, -1)))
+        h, _ = self.gru1(self.embed(x.reshape(B, T, -1)))
+        h, _ = self.gru2(self.drop(h))
         feat = torch.cat([h.mean(1), h.amax(1)], dim=-1)
         return self.heads[exercise](self.drop(feat))

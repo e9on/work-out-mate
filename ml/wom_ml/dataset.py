@@ -123,6 +123,51 @@ def _rotate(seq: np.ndarray, deg: float) -> np.ndarray:
     return out
 
 
+# ---------------------------------------------------------------- conf 처리(R14)
+def clip_conf(seq: np.ndarray) -> np.ndarray:
+    """모델 입력 conf = clip(score, 0, 1). 모든 소스 공통(RTMPose score는 1을 넘을 수 있음).
+
+    근거: MotionBERT 사전학습 입력의 conf는 [0,1] 범위이고, 소스마다 범위가 다르면 안 된다.
+    잘라서 0이 된 관절은 무효로 보고 좌표도 0.
+    """
+    out = np.array(seq, dtype=np.float64, copy=True)
+    out[..., -1] = np.clip(np.nan_to_num(out[..., -1], nan=0.0), 0.0, 1.0)
+    out[..., :-1] = np.where((out[..., -1] > 0)[..., None], out[..., :-1], 0.0)
+    return out
+
+
+def fill_empty_frames(x: np.ndarray) -> np.ndarray:
+    """(T,17,3) 정규화 뒤. 유효 관절이 하나도 없는 프레임의 좌표를 앞뒤 유효 프레임으로 선형 보간(conf 0).
+
+    시퀀스 양끝의 빈 프레임은 가장 가까운 유효 프레임 좌표로 채운다. 유효 프레임이 없으면 그대로.
+    (빈 프레임을 원점 (0,0)으로 남기면 소스마다 다른 '사람이 사라지는' 패턴이 입력에 생긴다.)
+    """
+    valid = (x[..., 2] > 0).any(axis=1)
+    if valid.all() or not valid.any():
+        return x
+    out = x.copy()
+    vi = np.flatnonzero(valid)
+    for f in np.flatnonzero(~valid):
+        nxt = vi[vi > f]
+        prv = vi[vi < f]
+        if len(prv) and len(nxt):
+            a, b = prv[-1], nxt[0]
+            w = (f - a) / (b - a)
+            out[f, :, :2] = (1 - w) * x[a, :, :2] + w * x[b, :, :2]
+        else:
+            out[f, :, :2] = x[(prv[-1] if len(prv) else nxt[0]), :, :2]
+        out[f, :, 2] = 0.0
+    return out
+
+
+def _jitter_conf(x: np.ndarray, rng) -> np.ndarray:
+    """conf가 상수인 소스(EC3D, 0/1)용 train 증강: 유효 관절의 conf를 관절·프레임별 U(0.5,1)로."""
+    out = x.copy()
+    ok = out[..., 2] > 0
+    out[..., 2] = np.where(ok, rng.uniform(0.5, 1.0, ok.shape), 0.0)
+    return out
+
+
 # ---------------------------------------------------------------- 분할
 def _person(r: Rep) -> tuple[str, str]:
     return (r.source, r.subject)
@@ -195,7 +240,7 @@ def build_arrays(reps: list[Rep], train: bool, yaws=DEFAULT_YAWS, seed: int = 0,
     for r in reps:
         views = [(y, sk.project(r.seq, y)) for y in yaws] if r.source == "ec3d" else [(None, r.seq)]
         for yaw, s2 in views:
-            s2 = np.asarray(s2, dtype=np.float64)
+            s2 = clip_conf(s2)
             if len(s2) < 3:
                 continue
             if train:
@@ -203,10 +248,12 @@ def build_arrays(reps: list[Rep], train: bool, yaws=DEFAULT_YAWS, seed: int = 0,
                 rot = rng.uniform(-10, 10)
                 size = rng.uniform(0.9, 1.1)
                 x = _resample_at(s2, _speed_positions(len(s2), T, f))
-                x = crop_scale(_rotate(x, rot), ratio=1.0 / size)
+                x = fill_empty_frames(crop_scale(_rotate(x, rot), ratio=1.0 / size))
+                if r.source == "ec3d":
+                    x = _jitter_conf(x, rng)
                 variants = [(False, x), (True, sk.flip(x))]
             else:
-                variants = [(False, crop_scale(resample(s2, T)))]
+                variants = [(False, fill_empty_frames(crop_scale(resample(s2, T))))]
             for flipped, x in variants:
                 xs.append(x)
                 labs.append(r)

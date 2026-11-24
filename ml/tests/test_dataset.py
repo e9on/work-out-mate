@@ -418,3 +418,60 @@ def test_load_own_default_raises_on_non_excluded_failure(tmp_path):
     write_own(tmp_path, counts=(12, 6, 5, 5))  # side.json 5회
     with pytest.raises(ValueError, match="side.json"):
         own_src.load_own(tmp_path)
+
+
+# ---------------------------------------------------------------- R14: conf 처리(Task 6 수정 1회차)
+def test_build_arrays_clips_conf_to_unit_range():
+    # RTMPose score처럼 1을 넘는 conf, 음수 conf는 모델 입력에서 [0,1]로 자른다(모든 소스 공통).
+    r = rep("zenodo", "p01")
+    r.seq[..., 2] = 1.7
+    r.seq[:, I["r_wrist"], 2] = -0.3
+    for train in (False, True):
+        X, _, meta = ds.build_arrays([r], train=train)
+        assert X[..., 2].max() <= 1.0 and X[..., 2].min() >= 0.0
+        assert np.isclose(X[..., 2].max(), 1.0)
+        for x, m in zip(X, meta):  # 음수→0이면 무효 관절(좌표 0). 반전 사본에선 왼손목 자리
+            assert (x[:, I["l_wrist" if m["flip"] else "r_wrist"]] == 0).all()
+
+
+def test_build_arrays_fills_empty_frames_by_interpolation():
+    # 관절 전체가 빠진 프레임(가운데·양끝)은 앞뒤 유효 프레임으로 좌표를 채우고 conf는 0.
+    F = 64  # T와 같게 해 재표본화가 프레임을 섞지 않게
+    r = rep("own", "me", F=F)
+    r.seq[30:34] = 0
+    r.seq[:2] = 0
+    r.seq[-1] = 0
+    X, _, _ = ds.build_arrays([r], train=False)
+    x = X[0]
+    assert (x[30:34, :, 2] == 0).all() and (x[:2, :, 2] == 0).all() and (x[-1, :, 2] == 0).all()
+    # 가운데: 29와 34 사이 선형 보간
+    for k, f in enumerate(range(30, 34), start=1):
+        w = k / 5
+        assert np.allclose(x[f, :, :2], (1 - w) * x[29, :, :2] + w * x[34, :, :2])
+    # 양끝: 가장 가까운 유효 프레임
+    assert np.allclose(x[0, :, :2], x[2, :, :2]) and np.allclose(x[1, :, :2], x[2, :, :2])
+    assert np.allclose(x[-1, :, :2], x[-2, :, :2])
+    assert np.abs(x[30, :, :2]).sum() > 0  # 원점(0,0)으로 남지 않음
+    # 경계상자는 conf>0 관절만: 빈 프레임을 채워도 유효 프레임 좌표는 채우기 전과 같다
+    before = ds.crop_scale(ds.resample(ds.clip_conf(r.seq), 64))
+    ok = (before[..., 2] > 0).any(axis=1)
+    assert np.allclose(x[ok], before[ok])
+
+
+def test_conf_jitter_only_for_ec3d_train():
+    r_ec = rep("ec3d", "1")
+    X, _, meta = ds.build_arrays([r_ec], train=True)
+    c = X[..., 2][X[..., 2] > 0]
+    assert c.min() >= 0.5 and c.max() <= 1.0 and c.std() > 0.05  # 흔들림 있음
+    # 반전 짝은 같은 사본을 뒤집은 것(conf도 짝끼리 같아야 함)
+    o = next(i for i, m in enumerate(meta) if not m["flip"])
+    f = next(i for i, m in enumerate(meta) if m["flip"] and m["aug_id"] == meta[o]["aug_id"])
+    assert np.allclose(X[f], sk.flip(X[o]))
+    # val/test(평가)에는 적용 금지: EC3D conf는 0/1 그대로
+    Xe, _, _ = ds.build_arrays([rep("ec3d", "4")], train=False)
+    assert set(np.unique(Xe[..., 2])) <= {0.0, 1.0}
+    # conf가 상수가 아닌 소스(zenodo)의 train에는 흔들기 없음
+    rz = rep("zenodo", "p01")
+    rz.seq[..., 2] = 0.8
+    Xz, _, _ = ds.build_arrays([rz], train=True)
+    assert np.allclose(Xz[..., 2][Xz[..., 2] > 0], 0.8)
