@@ -10,3 +10,9 @@ apps/spike/out/
 apps/spike/electron-dist/
 apps/app/out/
 apps/app/electron-dist/
+
+# ml 실험 산출물(데이터·가중치·결과)
+ml/data/
+ml/runs/
+ml/third_party/
+ml/weights/
