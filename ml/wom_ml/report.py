@@ -49,6 +49,9 @@ VIEW_NAMES = {
     "front.json": "정면 6회 (MediaPipe lite)",
     "rtm-litebox-1.0.json": "영상 20회 (RTMPose, 45도 근처)",
 }
+GROUP_NAMES = {"normal": "정상", "kneeForward": "무릎 앞으로", "heel": "뒤꿈치 들기", "fast": "빨리 내려가기"}
+NOTE_STD = ("±는 시드 3개의 모표준편차(ddof=0, 시드 수로 나눔. 표본 표준편차보다 약 18% 작게 나온다). "
+            "비율(%) 옆의 ±는 %p(퍼센트포인트) 단위.")
 SKIP_NAMES = {"noPerson": "사람 못 찾음(noPerson)", "oneLeg": "한쪽 다리만 보임(oneLeg)"}
 
 
@@ -78,7 +81,37 @@ def _missing(stage: str, status: dict) -> str:
     st = (status.get(stage) or {}).get("status")
     if stage in MB_STAGES and st in (None, "skipped_no_weights"):
         return PENDING
-    return NOT_RUN
+    if st is None:
+        return NOT_RUN
+    return f"결과 없음(실행 상태: {st})"  # failed 등을 가리지 않는다
+
+
+def _view_names(files) -> dict[str, str]:
+    """녹화 파일명 → 보고서 이름. VIEW_NAMES에 없는 파일명은 그대로 내보내지 않고 '녹화 N'으로."""
+    out, k = {}, 0
+    for f in files:
+        if f in out:
+            continue
+        if f in VIEW_NAMES:
+            out[f] = VIEW_NAMES[f]
+        else:
+            k += 1
+            out[f] = f"녹화 {k}"
+    return out
+
+
+def _clean_composition(ds: dict | None) -> str | None:
+    """test_own의 '앱이 지적할 오류가 없는 반복' 구성(group별 반복 수). own_groups 키는 '파일:group'."""
+    groups = (((ds or {}).get("splits") or {}).get("test_own") or {}).get("own_groups") or {}
+    agg = {}
+    for key, n in groups.items():
+        g = key.rsplit(":", 1)[-1]
+        if g in GROUP_NAMES:
+            agg[g] = agg.get(g, 0) + n
+    if not agg:
+        return None
+    parts = [f"{GROUP_NAMES[g]} {agg[g]}" for g in GROUP_NAMES if g in agg]
+    return f"{sum(agg.values())}회 = " + ", ".join(parts)
 
 
 # ---------------------------------------------------------------- 숫자 모양
@@ -165,10 +198,15 @@ def rules_judged_only(output: dict) -> dict:
 
 
 # ---------------------------------------------------------------- 표
-def _table_own(runs: Path, status: dict) -> list[str]:
-    out = ["## 표 1. 스쿼트 — 본인 녹화(test_own, 평가 전용)", "",
+def _table_own(runs: Path, status: dict, ds: dict | None = None) -> list[str]:
+    comp = _clean_composition(ds)
+    out = ["### 표 1. 스쿼트 — 본인 녹화(test_own, 평가 전용)", "",
            "앱이 지적하는 두 오류(kneeIn 무릎 모임, shallow 깊이 부족)의 F1과, 사용자가 느끼는 방식의 두 수치.",
-           "모델 행은 시드 3개의 평균±표준편차(괄호는 시드별 개수). '모든 칸'은 모델이 feetWide·trunkLean까지 지적한 경우도 오탐으로 센 값"
+           "'오류 없는 반복'은 바른 자세만이 아니라 **앱이 지적할 오류가 없는 반복** 전체다"
+           + (f"({comp}). " if comp else ". ")
+           + "무릎 앞으로·뒤꿈치 들기는 일부러 다르게 한 자세지만 앱 라벨에 없는 오류라 여기에 들어간다.",
+           "모델 행은 시드 3개의 평균±표준편차(괄호는 시드별 개수). " + NOTE_STD,
+           "'모든 칸'은 모델이 feetWide·trunkLean까지 지적한 경우도 오탐으로 센 값"
            "(본인 녹화에는 그 오류가 없으므로 잘못 지적하지 않는지만 본다).", ""]
     header = ["방법", "kneeIn F1", "shallow F1", "일부러 만든 오류 잡음", "오류 없는 반복 잘못 지적", "잘못 지적(모든 칸)"]
     rows = []
@@ -196,12 +234,13 @@ def _table_rules_extra(runs: Path) -> list[str]:
         return []
     j = rules_judged_only(_read(op))
     total = j["n_judged"] + j["n_skipped"]
-    out = ["", "### 표 1-1. 규칙 판정이 판정하지 못한 반복(R10)", "",
+    out = ["", "#### 표 1-1. 규칙 판정이 판정하지 못한 반복(R10)", "",
            f"앱 규칙은 {total}회 중 **{j['n_skipped']}회를 판정하지 못했다**(이유: "
            + ", ".join(f"{SKIP_NAMES.get(k, k)} {v}회" for k, v in sorted(j["skipped_by_reason"].items())) + "). "
            "표 1의 규칙 행은 앱이 실제로 하는 것처럼 이 반복을 '지적 안 함(놓침)'으로 센 값이다. "
            "아래는 녹화별 판정 못 한 수와, 판정한 반복만 남겨 다시 센 값(규칙에 유리한 비교).", ""]
-    rows = [[VIEW_NAMES.get(f, f), v["n"], v["skipped"]] for f, v in j["skipped_by_file"].items()]
+    vn = _view_names(j["skipped_by_file"])
+    rows = [[vn[f], v["n"], v["skipped"]] for f, v in j["skipped_by_file"].items()]
     out += _table(["녹화", "반복 수", "판정 못 함"], rows)
     pe, a = j["per_error"], j["app_style"]
     out += ["", *_table(["규칙 판정, 판정한 반복만", "반복 수", "kneeIn F1", "shallow F1", "일부러 만든 오류 잡음",
@@ -228,17 +267,18 @@ def _lp_rows(runs: Path, status: dict, ex: str) -> list[list]:
 def _table_ec3d(runs: Path, status: dict, ds: dict | None) -> list[str]:
     reps = ((ds or {}).get("splits", {}).get("test_ec3d", {}) or {})
     n_reps = sum(reps.get("reps", {}).values()) if reps else None
-    out = ["", "## 표 2. EC3D 피험자 4(test_ec3d, 학습에 안 쓴 사람)", "",
+    out = ["", "### 표 2. EC3D 피험자 4(test_ec3d, 학습에 안 쓴 사람)", "",
            "EC3D는 3D 좌표라 가상 카메라 5방향(0·30·45·60·90°)으로 2D에 투영해 평가한다. "
            + (f"샘플 {reps.get('samples')}개는 **독립된 반복 {n_reps}개 × 5방향**이다"
               f"(같은 반복을 다른 각도에서 본 것이므로, 실제로 서로 다른 반복은 {n_reps}개뿐). " if n_reps else "")
-           + "아래는 5방향 전체를 합친 값. 일부러 만든 오류 잡음/오류 없는 반복 잘못 지적은 그 운동의 모든 오류 칸 기준.", ""]
+           + "아래는 5방향 전체를 합친 값. 일부러 만든 오류 잡음/오류 없는데 지적은 그 운동의 모든 오류 칸 기준이고, "
+           "괄호의 n/d는 **샘플 수**(반복 수 × 5방향)다. " + NOTE_STD, ""]
     for ex, title in (("squat", "스쿼트"), ("lunge", "런지"), ("plank", "플랭크")):
         cols = HEAD_LABELS[ex]
-        out += [f"### 표 2-{'123'[['squat', 'lunge', 'plank'].index(ex)]}. {title}", ""]
+        out += [f"#### 표 2-{'123'[['squat', 'lunge', 'plank'].index(ex)]}. {title}", ""]
         out += _table(["방법", *[f"{c} F1" for c in cols], "오류 잡음", "오류 없는데 지적"], _lp_rows(runs, status, ex))
         out.append("")
-    out += ["### 표 2-4. 투영 방향(yaw)별", "",
+    out += ["#### 표 2-4. 투영 방향(yaw)별", "",
             "칸 = 그 운동 오류 칸들의 평균 F1(시드 평균±표준편차) / 오류 없는 반복을 잘못 지적한 비율(시드 평균). "
             "앱 촬영 조건은 45°에 가깝다. 방향마다 반복 수가 작아(스쿼트 약 30개) 칸 사이 차이는 크게 믿지 말 것.", ""]
     rows = []
@@ -264,7 +304,7 @@ def _table_ec3d(runs: Path, status: dict, ds: dict | None) -> list[str]:
 
 
 def _table_data(ds: dict | None) -> list[str]:
-    out = ["", "## 데이터 개수(소스·분할별)", ""]
+    out = ["", "### 데이터 개수(소스·분할별)", ""]
     if not ds:
         return out + ["(`python -m wom_ml.dataset --summary`를 먼저 실행)"]
     names = {"train": "학습(train)", "val": "검증(val, 조기 종료용)", "test_ec3d": "평가: EC3D 피험자 4",
@@ -286,7 +326,7 @@ def _table_data(ds: dict | None) -> list[str]:
         out += _table(["분할", "운동", "반복", "오류 없음", "오류별"], lab_rows)
     extra = []
     if ds.get("own_excluded"):
-        extra.append("본인 녹화에서 뺀 것: " + ", ".join(f"{VIEW_NAMES.get(k, k)} — {v}" for k, v in ds["own_excluded"].items()))
+        extra.append("본인 녹화에서 뺀 것: " + ", ".join(f"{_view_names(ds['own_excluded'])[k]} — {v}" for k, v in ds["own_excluded"].items()))
     if ds.get("ec3d_excluded"):
         extra.append("EC3D에서 뺀 것: " + ", ".join(f"{k} {v}개(논문 표에 없는 클래스)" for k, v in ds["ec3d_excluded"].items()))
     if ds.get("zenodo_duplicates_removed") is not None:
@@ -297,7 +337,7 @@ def _table_data(ds: dict | None) -> list[str]:
 
 
 def _table_stages(runs: Path, status: dict) -> list[str]:
-    out = ["", "## 단계 실행 상태", ""]
+    out = ["", "### 단계 실행 상태", ""]
     rows = []
     for st in STAGE_NAMES:
         info = status.get(st) or {}
@@ -333,7 +373,7 @@ def render_report(runs: Path) -> str:
     ds = _read(dsp) if dsp.is_file() else None
     lines = ["> 이 절은 `ml/runs/`의 집계 결과로 자동 생성된다. MotionBERT 단계에 결과가 없으면 "
              f"'{PENDING}'으로 표시하고, 가중치를 넣고 `run_all` → `report`를 다시 돌리면 채워진다.", ""]
-    lines += _table_own(runs, status)
+    lines += _table_own(runs, status, ds)
     lines += _table_rules_extra(runs)
     lines += _table_ec3d(runs, status, ds)
     lines += _table_data(ds)
@@ -347,7 +387,8 @@ def update_doc(doc: str | None, generated: str) -> str:
     block = f"{START}\n\n{generated.strip()}\n\n{END}"
     if doc is None:
         return f"# 파인튜닝 실험 결과\n\n{block}\n\n## 해석\n\n(사람이 쓴다)\n"
-    i, j = doc.find(START), doc.find(END)
+    i = doc.find(START)
+    j = doc.find(END, i + len(START)) if i >= 0 else -1
     if i < 0 or j < 0 or j < i:
         raise ValueError("보고서에 자동 생성 표식(START/END)이 없음 — 사람 글을 덮지 않으려고 멈춤")
     return doc[:i] + block + doc[j + len(END):]

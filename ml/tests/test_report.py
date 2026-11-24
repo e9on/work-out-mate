@@ -152,3 +152,40 @@ def test_update_doc_keeps_human_text():
     assert rp.START in fresh and rp.END in fresh and "새 표" in fresh
     with pytest.raises(ValueError):
         rp.update_doc("표식 없는 문서", "새 표")
+
+
+def test_unknown_recording_name_hidden(runs):
+    # VIEW_NAMES에 없는 녹화 파일명은 그대로 내보내지 않고 일반 이름으로
+    out = json.loads((runs / "rules" / "output.json").read_text(encoding="utf8"))
+    out["sets"][0]["file"] = "diag45-12.json"
+    rp.VIEW_NAMES.pop("secret-name.json", None)
+    names = rp._view_names(["diag45-12.json", "secret-name.json", "other-private.json"])
+    assert names["diag45-12.json"] == rp.VIEW_NAMES["diag45-12.json"]
+    assert names["secret-name.json"] == "녹화 1" and names["other-private.json"] == "녹화 2"
+    _write(runs / "dataset_summary.json", {"splits": {}, "own_excluded": {"secret-name.json": "제외"}})
+    md = rp.render_report(runs)
+    assert "secret-name" not in md
+
+
+def test_notes_and_clean_composition(runs):
+    s = json.loads((runs / "dataset_summary.json").read_text(encoding="utf8"))
+    s["splits"]["test_own"]["own_groups"] = {"a.json:normal": 3, "b.json:normal": 1, "a.json:kneeForward": 2,
+                                            "a.json:heel": 1, "a.json:kneeIn": 5}
+    _write(runs / "dataset_summary.json", s)
+    md = rp.render_report(runs)
+    assert "ddof=0" in md and "%p" in md
+    assert "정상 4" in md and "무릎 앞으로 2" in md and "뒤꿈치 들기 1" in md
+    assert "앱이 지적할 오류가 없는 반복" in md
+
+
+def test_missing_shows_failed_status(runs):
+    st = json.loads((runs / "run_all_status.json").read_text(encoding="utf8"))
+    st["mb_probe"] = {"status": "failed"}
+    _write(runs / "run_all_status.json", st)
+    assert "실행 상태: failed" in rp.render_report(runs)
+
+
+def test_update_doc_end_after_start():
+    doc = f"앞 글에 인용된 {rp.END} 표식\n{rp.START}\n옛 표\n{rp.END}\n뒤 글\n"
+    new = rp.update_doc(doc, "새 표")
+    assert new.startswith(f"앞 글에 인용된 {rp.END} 표식") and "옛 표" not in new and "뒤 글" in new
