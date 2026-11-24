@@ -31,10 +31,18 @@ jobs:
         run: npm run typecheck -w packages/core
       - name: core 테스트 (개인 녹화 합격 테스트는 파일이 없으면 건너뜀)
         run: npm test -w packages/core
+      - name: 진짜 앱 테스트 (CSP 빌드 산출물 포함)
+        run: npm test -w apps/app
+      - name: 진짜 앱 타입 검사
+        run: npm run typecheck -w apps/app
+      - name: 진짜 앱 빌드
+        run: npm run build -w apps/app
       - name: 시험용 앱 웹 빌드
         run: npm run build -w apps/spike
       - name: PC 앱(Electron) main/preload 타입 검사·빌드
         run: npm run electron:build -w apps/spike
+      - name: 진짜 앱 PC(Electron) main/preload 타입 검사·빌드
+        run: npm run electron:build -w apps/app
 
   android:
     name: Android APK 빌드
@@ -65,11 +73,19 @@ jobs:
           done
           exit 1
       - name: 권한 확인 (CAMERA만, INTERNET 없음, allowBackup=false)
+        run: bash scripts/check-apk-perms.sh apps/spike/android/app/build/outputs/apk/debug/app-debug.apk
+      - name: 앱 웹 빌드 + Capacitor 동기화
+        # 모델 파일(.task)은 git에 없어서 CI에는 없다. copy-wasm이 경고만 하고 넘어간다.
+        run: npm run android:build -w apps/app
+      - name: 앱 디버그 APK 빌드
+        working-directory: apps/app/android
+        # Maven Central이 가끔 429(요청 과다)로 의존성 다운로드를 거절한다. 잠시 쉬었다가 최대 3번 시도한다.
         run: |
-          AAPT2=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
-          APK=apps/spike/android/app/build/outputs/apk/debug/app-debug.apk
-          "$AAPT2" dump permissions "$APK" | tee perms.txt
-          if grep -q 'android.permission.INTERNET' perms.txt; then echo "INTERNET 권한이 들어 있어요"; exit 1; fi
-          grep -q 'android.permission.CAMERA' perms.txt
-          "$AAPT2" dump xmltree --file AndroidManifest.xml "$APK" | grep -A0 'allowBackup' | tee backup.txt
-          grep -q '=false' backup.txt
+          for i in 1 2 3; do
+            ./gradlew assembleDebug --no-daemon && exit 0
+            echo "Gradle 빌드 실패 (${i}/3). 30초 뒤 다시 시도해요."
+            sleep 30
+          done
+          exit 1
+      - name: 앱 권한 확인 (CAMERA만, INTERNET 없음, allowBackup=false)
+        run: bash scripts/check-apk-perms.sh apps/app/android/app/build/outputs/apk/debug/app-debug.apk

@@ -1,5 +1,6 @@
 import type { PoseFrame } from '../types';
 import type { RepEvent } from '../counter/repCounter';
+import { restSign } from '../counter/repEngine';
 import {
   EXERCISES,
   createTracker,
@@ -24,6 +25,10 @@ export type SetConfig = {
   idleEndMs?: number;
   /** 같은 진단 hint를 다시 내기까지의 최소 간격(ms). 기본 10000. calibratedByDefault는 세트당 한 번만 */
   hintRepeatMs?: number;
+  /** 같은 진단이 이 시간(ms) 이어져야 hint를 낸다. 기본 1500 */
+  hintAfterMs?: number;
+  /** waitingReady에 들어간 뒤 이 시간(ms) 동안은 notReady hint를 내지 않는다. 기본 3000 */
+  notReadyGraceMs?: number;
 };
 
 export type SetPhase = 'waitingReady' | 'countdown' | 'active' | 'finished';
@@ -40,6 +45,8 @@ export type SetEvent =
 
 /** 시작 자세가 이만큼 이어지면 시작(pullup). deadHang은 HoldTimer의 시작 판정을 그대로 쓴다 */
 const START_POSE_MS = 300;
+/** backToReady 뒤 준비 자세가 이만큼 연속으로 흐트러져야 흐트러짐으로 본다(visibility 한 프레임 깜빡임 무시) */
+const BREAK_MS = 400;
 const COUNTDOWN_NS = [3, 2, 1] as const;
 
 /**
@@ -55,6 +62,8 @@ export class SetRunner {
   private readonly undoMs: number;
   private readonly idleEndMs: number;
   private readonly hintRepeatMs: number;
+  private readonly hintAfterMs: number;
+  private readonly notReadyGraceMs: number;
 
   private tr: Tracker;
   private ph: SetPhase = 'waitingReady';
@@ -66,6 +75,17 @@ export class SetRunner {
   private pausedAt: number | null = null;
   /** 진단별 마지막 hint 시각 */
   private readonly hintAt = new Map<Diagnosis, number>();
+  /** 지금 이어지고 있는 ok가 아닌 진단과 그 진단이 시작된 시각(hint 지속 시간 판정) */
+  private diagSince: { d: Diagnosis; t: number } | null = null;
+  /** waitingReady에 들어간 시각(notReady 유예 기준). 세트 처음은 첫 push·tick 시각 */
+  private readyEnteredAt: number | null = null;
+  /**
+   * backToReady 뒤 준비 자세가 한 번 흐트러지기를 기다리는 중(10.1(c)). 이 동안은 프레임을 트래커에 넣지 않고
+   * 시작 판정도 hint도 하지 않는다. 흐트러짐이 BREAK_MS 이어지면 내리고, 그 프레임부터 보통처럼 처리한다.
+   */
+  private needBreak = false;
+  /** 지금 이어지는 흐트러짐의 첫 프레임 시각 */
+  private breakSince: number | null = null;
 
   /** pullup 시작 자세가 처음 true였던 시각 */
   private poseSince: number | null = null;
@@ -100,6 +120,8 @@ export class SetRunner {
     this.undoMs = cfg.undoBeforeStopMs ?? 1500;
     this.idleEndMs = cfg.idleEndMs ?? this.def.idleEndMs;
     this.hintRepeatMs = cfg.hintRepeatMs ?? 10000;
+    this.hintAfterMs = cfg.hintAfterMs ?? 1500;
+    this.notReadyGraceMs = cfg.notReadyGraceMs ?? 3000;
     this.tr = createTracker(cfg.exercise);
   }
 
@@ -120,8 +142,35 @@ export class SetRunner {
     return this.pausedAt !== null;
   }
 
+  /** start 이후 센 반복 수(start 전이나 매달리기 운동은 0). 결과의 count와 같은 값 */
+  get count(): number {
+    if (this.ph === 'finished') return this.res!.count;
+    return this.tr.state().kind === 'reps' ? this.reps.length : 0;
+  }
+
+  /** 카운트다운 중이면 시작까지 남은 ms(일시정지 중에는 멈춘 값), 아니면 null. t는 지금 시각(지금까지 본 시각보다 이르면 그 시각) */
+  countdownRemainingMs(t: number): number | null {
+    if (this.ph !== 'countdown') return null;
+    const ref = this.pausedAt !== null ? this.pausedAt : Math.max(t, this.lastT);
+    return Math.max(0, this.countdownT0 + this.countdownMs - ref);
+  }
+
+  /** 매달린 시간(ms, 일시정지 시간 제외). start 전이나 반복 운동은 0. 결과의 heldMs와 같은 값 */
+  get heldMs(): number {
+    if (this.ph === 'finished') return this.res!.heldMs;
+    if (this.ph !== 'active') return 0;
+    const s = this.tr.state();
+    return s.kind === 'hold' ? this.netHeldMs(s.heldMs) : 0;
+  }
+
+  /** backToReady 뒤 준비 자세가 한 번 흐트러지기를 기다리는 중(앱이 "잠깐 쉬었다가 다시 자세를" 안내에 쓴다) */
+  get waitingForBreak(): boolean {
+    return this.ph === 'waitingReady' && this.needBreak;
+  }
+
   push(f: PoseFrame): SetEvent[] {
     if (this.ph === 'finished' || this.pausedAt !== null || f.t < this.lastT) return [];
+    this.readyEnteredAt ??= f.t;
     const out: SetEvent[] = [];
     // 먼저 시간을 흘려 카운트다운·idle·noStart를 처리하고, 그다음 이 프레임을 지금 단계에 맞게 넣는다.
     this.advance(f.t, out);
@@ -130,6 +179,18 @@ export class SetRunner {
     this.lastT = f.t;
     this.lastFrameT = f.t;
 
+    if (ph === 'waitingReady' && this.needBreak) {
+      // 기다리는 동안은 트래커에 넣지 않고 시작 판정도 hint도 하지 않는다(안내는 앱이 waitingForBreak로 한다).
+      this.diagSince = null;
+      if (!this.isBreak(f)) {
+        this.breakSince = null; // 흐트러지지 않은 프레임이 하나라도 오면 처음부터 다시 잰다
+        return out;
+      }
+      this.breakSince ??= f.t;
+      if (f.t - this.breakSince < BREAK_MS) return out;
+      this.needBreak = false;
+      this.breakSince = null;
+    }
     if (ph === 'countdown') {
       // 카운트다운 중에도 트래커는 계속 돌린다(자세가 깨져도 진행, 반복은 start 기준점으로 걸러짐).
       this.tr.push(f);
@@ -144,6 +205,7 @@ export class SetRunner {
 
   tick(t: number): SetEvent[] {
     if (this.ph === 'finished' || this.pausedAt !== null || t <= this.lastT) return [];
+    this.readyEnteredAt ??= t;
     const out: SetEvent[] = [];
     this.advance(t, out);
     this.lastT = Math.max(this.lastT, t);
@@ -166,9 +228,16 @@ export class SetRunner {
     this.pausedAt = null;
     if (this.ph === 'finished') return;
     this.countdownT0 += d;
-    this.idleFrom += d;
+    // 복귀 여유: 폰까지 걸어와 일시정지했다가 돌아가는 시간을 준다. idle·noStart는 resume 시각부터 다시 잰다.
+    this.idleFrom = Math.max(this.idleFrom + d, t);
     this.lastFrameT += d;
+    // 일시정지 전의 진단은 이어 보지 않는다(hint 지속 시간을 처음부터 잰다).
+    this.diagSince = null;
     if (this.ph === 'waitingReady') {
+      this.readyEnteredAt = t;
+      // 사용자가 직접 "다시 시작"을 눌렀다: 흐트러짐을 기다리지 않고 바로 준비 자세 판정을 받는다.
+      this.needBreak = false;
+      this.breakSince = null;
       // 보정·시작 자세 판정을 처음부터 다시 한다. 일시정지 시간 때문에 보정이 타임아웃되어 기본값으로
       // 잡히거나, HoldTimer가 일시정지 전 시각부터 매달린 것으로 보는 일을 막는다.
       this.tr = createTracker(this.cfg.exercise);
@@ -186,7 +255,8 @@ export class SetRunner {
     this.lastT = Math.max(this.lastT, t);
   }
 
-  stop(t: number): SetEvent[] {
+  /** 세트를 손으로 끝낸다. reason: 'manual' 그만하기·건너뛰기(기본), 'button' 세트 끝 버튼 */
+  stop(t: number, reason: 'manual' | 'button' = 'manual'): SetEvent[] {
     if (this.ph === 'finished') return [];
     // 지금까지 본 시각보다 이른 stop은 그 시각으로 본다. 일시정지 중이면 시간은 일시정지한 순간에 멈춰 있다.
     const now = Math.max(t, this.lastT);
@@ -202,7 +272,7 @@ export class SetRunner {
     }
     // 그만하기를 누르려고 움직이다 잘못 센 반복을 되돌린다(#1).
     this.reps = this.reps.filter((r) => !(r.endT > ref - this.undoMs));
-    this.finish(now, 'manual', out);
+    this.finish(now, reason, out);
     return out;
   }
 
@@ -229,7 +299,7 @@ export class SetRunner {
     } else if (this.def.start !== 'visible' && t - this.idleFrom >= this.noStartMs) {
       // 'visible'(네거티브)은 보이면 바로 다시 시작하므로, 되돌리면 "다시 자세를" → "시작"이 20초마다 반복된다.
       out.push({ type: 'backToReady' });
-      this.toWaitingReady();
+      this.toWaitingReady(t);
     }
   }
 
@@ -289,6 +359,7 @@ export class SetRunner {
     this.pendingPauseMs = 0;
     this.rawAtResume = 0;
     this.pausedHoldMs = 0;
+    this.diagSince = null;
     out.push({ type: 'start' });
   }
 
@@ -312,7 +383,7 @@ export class SetRunner {
       this.pausedHoldMs += this.pendingPauseMs;
       this.pendingPauseMs = 0;
     }
-    const held = this.heldMs(s.heldMs);
+    const held = this.netHeldMs(s.heldMs);
     const secs = Math.floor(held / 1000);
     while (this.holdSecs < secs) {
       this.holdSecs += 1;
@@ -325,12 +396,23 @@ export class SetRunner {
     if (s.state === 'ended') this.finish(t, 'released', out);
   }
 
-  private heldMs(raw: number): number {
+  private netHeldMs(raw: number): number {
     return Math.max(0, raw - this.pausedHoldMs);
   }
 
   private hint(t: number, d: Diagnosis, out: SetEvent[]): void {
-    if (d === 'ok') return;
+    if (d === 'ok') {
+      this.diagSince = null;
+      return;
+    }
+    // 같은 진단이 hintAfterMs 이어져야 낸다(한 프레임짜리 깜빡임으로 음성이 끊기지 않게). 진단이 바뀌면 다시 잰다.
+    if (this.diagSince?.d !== d) this.diagSince = { d, t };
+    let since = this.diagSince.t;
+    // waitingReady에 막 들어온 사람(쉬는 시간이 끝나 아직 서 있는 등)에게는 notReady를 바로 말하지 않는다.
+    if (d === 'notReady' && this.ph === 'waitingReady' && this.readyEnteredAt !== null) {
+      since = Math.max(since, this.readyEnteredAt + this.notReadyGraceMs);
+    }
+    if (t - since < this.hintAfterMs) return;
     const last = this.hintAt.get(d);
     // 기본값 보정 안내는 세트당 한 번(운동 중 반복되면 방해). 나머지는 hintRepeatMs 간격으로 다시 낸다.
     if (last !== undefined && (d === 'calibratedByDefault' || t - last < this.hintRepeatMs)) return;
@@ -339,12 +421,11 @@ export class SetRunner {
   }
 
   private finish(t: number, reason: EndReason, out: SetEvent[]): void {
-    const s = this.tr.state();
     this.res = {
       exercise: this.cfg.exercise,
       target: this.cfg.target,
-      count: s.kind === 'reps' ? this.reps.length : 0,
-      heldMs: s.kind === 'hold' ? this.heldMs(s.heldMs) : 0,
+      count: this.count,
+      heldMs: this.heldMs,
       negativeDescentMs: this.def.id === 'negative' ? this.reps.map((r) => r.outMs) : [],
       startT: this.startT,
       endT: t,
@@ -354,13 +435,38 @@ export class SetRunner {
     out.push({ type: 'finished', reason, result: copyResult(this.res) });
   }
 
-  /** 첫 반복 없이 시간이 지났다: 트래커를 새로 만들고 준비 자세부터 다시 */
-  private toWaitingReady(): void {
+  /**
+   * 첫 반복 없이 시간이 지났다: 트래커를 새로 만들고 준비 자세부터 다시. 서 있기(매달려 있기)만 해서는
+   * 다시 시작하지 않도록, 준비 자세가 한 번 흐트러질 때까지 시작 판정을 막는다(10.1(c)).
+   */
+  private toWaitingReady(t: number): void {
     this.tr = createTracker(this.cfg.exercise);
     this.ph = 'waitingReady';
     this.poseSince = null;
     this.reps = [];
     this.prevRep = null;
+    this.readyEnteredAt = t;
+    this.diagSince = null;
+    this.needBreak = true;
+    this.breakSince = null;
+  }
+
+  /**
+   * 준비 자세가 흐트러진 프레임인가(BREAK_MS 연속이어야 인정).
+   * calibrate: 신호가 안 보임(null·NaN), ready가 true가 아님(false 또는 null: 몸통이 안 보임),
+   *   또는 신호가 rest 쪽 minBaseline보다 안쪽(스쿼트면 무릎 150° 미만: 앉거나 스쿼트를 시작함).
+   * pose: 시작 자세(pullup startPose, deadHang holding)가 true가 아님.
+   */
+  private isBreak(f: PoseFrame): boolean {
+    const def = this.def;
+    if (def.kind === 'hold') return def.holding(f) !== true;
+    if (def.start === 'pose') return (def.startPose ? def.startPose(f) : null) !== true;
+    const v = def.signal(f);
+    if (v === null || !Number.isFinite(v)) return true;
+    if (def.mode !== 'adaptive') return false;
+    if (def.ready(f) !== true) return true;
+    const k = restSign(def.adaptive.restSide);
+    return k * v < k * def.adaptive.minBaseline;
   }
 }
 

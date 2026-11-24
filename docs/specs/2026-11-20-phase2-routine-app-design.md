@@ -144,7 +144,7 @@ Phase 0에서 갤럭시 S23 앱이 30fps로 동작하고, 횟수·시간을 실�
 ### 5.4 세트 진행기 `SetRunner` (새로 만듦)
 - 위치: `src/session/setRunner.ts`
 - 입력: `push(frame: PoseFrame)`, `tick(t: number)`(프레임이 없을 때의 시간 진행), `stop(t)`, `pause(t)`, `resume(t)`
-- 출력: 호출마다 그 사이 일어난 이벤트 배열(일어난 순서). 조회: `phase`, `tracker`(TrackerState), `paused`, `result`(끝난 세트 결과의 **복사본**, 끝나기 전이거나 시작 전 stop이면 null)
+- 출력: 호출마다 그 사이 일어난 이벤트 배열(일어난 순서). 조회: `phase`, `tracker`(TrackerState), `paused`, `waitingForBreak`(backToReady 뒤 흐트러짐을 기다리는 중), `result`(끝난 세트 결과의 **복사본**, 끝나기 전이거나 시작 전 stop이면 null)
 - 시간: `f.t`와 `tick(t)`는 같은 시계다. 지금까지 본 시각보다 이른 push·tick은 무시한다.
 - 상태: `waitingReady | countdown | active | finished`
 - 시작 방식은 운동 정의의 `start` 설정으로 정한다.
@@ -154,17 +154,22 @@ Phase 0에서 갤럭시 S23 앱이 30fps로 동작하고, 횟수·시간을 실�
   - 셋 다 같은 상태 기계를 쓰고, 카운트다운 길이만 0이 된다.
 - 이벤트(앱이 음성과 화면으로 바꿈)
   - `{type:'countdown', n:3|2|1}`, `{type:'start'}`
-  - `{type:'backToReady'}`: start 뒤 첫 반복 없이 noStartMs(기본 20초)가 지나 준비 자세 대기로 돌아갔다(세트가 끝난 것이 아니다. 트래커를 새로 만든다)
+  - `{type:'backToReady'}`: start 뒤 첫 반복 없이 noStartMs(기본 20초)가 지나 준비 자세 대기로 돌아갔다(세트가 끝난 것이 아니다. 트래커를 새로 만든다). 그 뒤에는 준비 자세가 **한 번 흐트러졌다가 다시 잡혀야** 다시 시작한다(10.1(c)). 그래서 서 있기(매달려 있기)만 하면 backToReady는 한 번만 나온다.
   - `{type:'rep', count}`, `{type:'hold', seconds}`(매달리기는 1초마다)
   - `{type:'goalReached'}`
   - `{type:'finished', reason:'target'|'idle'|'manual'|'released', result}`. EndReason에 `noStart`는 없다.
-  - `{type:'hint', diagnosis}`: ok가 아닌 진단. 같은 진단은 hintRepeatMs(기본 10초) 간격으로 다시 내고, `calibratedByDefault`는 **세트당 한 번**만 낸다.
+  - `{type:'hint', diagnosis}`: ok가 아닌 진단. 같은 진단이 `hintAfterMs`(기본 1500ms) **이어져야** 처음 낸다(10.1(a)). waitingReady에 들어간 뒤 `notReadyGraceMs`(기본 3000ms) 동안은 notReady를 내지 않는다. 그 뒤 같은 진단은 hintRepeatMs(기본 10초) 간격으로 다시 내고, `calibratedByDefault`는 **세트당 한 번**만 낸다. countdown 중에는 내지 않는다.
 - **음성 문구는 코어가 정하지 않는다.** 이벤트만 내보내고, 문구와 말하기는 앱이 맡는다(언어와 플랫폼을 분리하기 위해서다).
 - 2절의 규칙(5초 반복 없음, 20초 시작 없음, 그만하기 직전 1.5초 되돌림, 목표 도달, 매달리기 목표 달성 후 계속)을 구현한다. 시간 값은 설정으로 둔다.
 - 구현된 세부 규칙
   - 카운트다운: `countdownMs` 안에 들어가는 숫자만 낸다(`n*1000 <= countdownMs`인 n. 1500이면 1만, 0이면 없음). 3000이면 3·2·1이 0·1000·2000ms에, start는 3000ms에 나온다. 카운트다운 중에도 트래커는 돌리고, start 시점 이전에 확정된 반복은 세지 않는다.
   - `stop(t)`: 먼저 시간을 흘려(advance) idle이 지났으면 idle로, 카운트다운이 끝났으면 start부터 처리한 뒤 끝낸다. 되돌림 기준 시각은 일시정지 중이면 `pausedAt`(그 순간에 시간이 멈춰 있다), 아니면 지금 시각이다. 세트가 시작되기 전(waitingReady·countdown)에 stop하면 기록 없이 finished 상태만 되고 이벤트는 `[]`다.
-  - `resume`: waitingReady였다면 트래커를 새로 만든다(일시정지 시간 때문에 보정이 타임아웃되거나 HoldTimer가 일시정지 전부터 매달린 것으로 보는 일을 막는다). active였다면 트래커를 그대로 둔다. 카운트다운·idle 기준 시각과 마지막 프레임 시각은 일시정지한 만큼 뒤로 민다.
+  - `resume`: waitingReady였다면 트래커를 새로 만든다(일시정지 시간 때문에 보정이 타임아웃되거나 HoldTimer가 일시정지 전부터 매달린 것으로 보는 일을 막는다). active였다면 트래커를 그대로 둔다. 카운트다운 기준 시각과 마지막 프레임 시각은 일시정지한 만큼(d) 뒤로 민다. idle·noStart 기준 시각은 **복귀 여유**를 준다: `idleFrom = max(idleFrom + d, resumeT)`(10.1(b)). 그래서 resume 뒤 적어도 idleEndMs(5초)·noStartMs(20초)는 끝나거나 돌아가지 않는다. hint 지속 시간은 resume 뒤 처음부터 다시 잰다.
+  - hint 지속 시간: 진단별로 시작 시각을 기억한다. 진단이 바뀌거나 ok 프레임이 하나라도 끼면 처음부터 다시 잰다. notReady 유예는 waitingReady에 들어간 시각(세트 처음의 첫 push·tick, backToReady, waitingReady에서의 resume)부터 잰다. 유예 중에 시작된 notReady는 유예가 끝난 시각부터 1500ms를 잰다(들어간 뒤 4500ms에 첫 hint).
+  - backToReady 뒤 "흐트러짐": 흐트러진 프레임이 **400ms 연속**이어야 인정한다(visibility 한 프레임 깜빡임은 무시). 중간에 흐트러지지 않은 프레임이 하나라도 오면 처음부터 다시 잰다. 흐트러진 프레임은 다음과 같다.
+    - calibrate 운동: 판정 신호가 안 보임(null·NaN), `ready`가 true가 아님(false, 또는 몸통이 화면 밖이라 null), 또는 신호가 rest 쪽 `minBaseline`보다 안쪽(`restSide` 부호 반영. 스쿼트는 무릎 150° 미만: 안내를 듣고 바로 앉거나 스쿼트를 시작한 경우). ready가 계속 null이면 보정은 원래 규칙대로 하므로 기본값 보정으로 다시 도는 반복은 받아들인다.
+    - pose 운동: `startPose`(매달리기는 `holding`)가 true가 아닌 프레임.
+  - 흐트러짐을 기다리는 동안(`waitingForBreak` true)의 프레임은 트래커에 넣지 않고, 시작 판정도 hint도 하지 않는다. 안내("잠깐 쉬었다가 다시 자세를 잡아 주세요")는 앱이 `waitingForBreak`를 보고 한다. 흐트러짐이 인정된 프레임부터는 보통처럼 트래커에 넣어 보정·시작 판정을 다시 한다. 기다리는 중 resume(사용자가 직접 누른 "다시 시작")하면 기다림을 푼다. 'visible'(네거티브)은 backToReady가 없으므로 해당하지 않는다.
   - 매달리기에서 프레임이 끊기면 `tick(t)`가 HoldTimer와 같은 규칙으로 판정한다: 마지막 프레임 뒤 `hold.graceMs`가 지나면 `released`로 끝낸다. 이때 heldMs는 HoldTimer가 멈춰 둔 값이다.
   - 매달리기 `heldMs`는 일시정지 시간을 뺀다. HoldTimer는 일시정지를 모르므로, resume 뒤 holding 프레임이 와서 값이 일시정지 구간을 건너 늘었을 때만(증가가 확인됐을 때만) 그 일시정지 시간을 뺀다.
 - `result`는 세트 기록이다: 목표 종류·값, 실제 횟수, 버틴 ms, 반복별 내려온 ms, 세트 시작·끝 시각(프레임 시계), 종료 사유.
@@ -187,6 +192,7 @@ Phase 0에서 갤럭시 S23 앱이 30fps로 동작하고, 횟수·시간을 실�
   - **`skipRest(t)`**: 쉬는 시간을 바로 끝내고 다음 세트로 간다(쉬는 시간이 끝났을 때와 같은 경로라 restEnd, 운동이 바뀌면 exerciseStart). completed에 영향이 없다. 쉬는 시간이 아니면 `[]`.
   - **`skipExercise(t)`**: 지금 운동의 남은 세트를 건너뛰고 다음 운동의 첫 세트로 간다(쉬는 시간 없음). 세트 중이면 반복이 있을 때만 기록한다. 쉬는 시간 중이면 "방금 끝난 운동의 남은 세트"를 건너뛴다(다음 운동을 건너뛰지 않는다). **실제로 건너뛴 세트가 있을 때만** completed가 false가 된다. 운동 사이 쉬는 시간이면 건너뛴 세트가 없어 skipRest와 같다.
   - **일시정지 중에 skipRest·skipExercise를 부르면 일시정지를 풀고 진행한다**(새 세트는 멈추지 않은 상태로 시작).
+- 화면 조회·중간 저장: `snapshot(t)`은 `{phase, paused, exerciseIndex, setIndex, set, rest}`를 돌려준다. `set`은 세트 중일 때만 `{setPhase, tracker, count, heldMs, waitingForBreak, countdownRemainingMs}`(`countdownRemainingMs`는 countdown일 때 남은 ms, 아니면 null. count는 start 이후 센 반복 수, waitingReady·countdown에서는 0)이고, `rest`는 쉬는 시간일 때만 `{remainingMs, totalMs, next}`다(remainingMs는 화면에서 올림 정수 초로 보여야 restTick과 맞는다). 남은 시간은 일시정지를 반영하며(일시정지 중에는 멈춘 값), 상태를 바꾸지 않고 lastT도 갱신하지 않는다. t가 지금까지 본 시각보다 이르면 그 시각 기준이다. `sessionSoFar(t)`은 기록된 세트만 깊은 복사로 담은 `completed:false` 세션(id는 생성자의 sessionId, endedAt은 toEpoch(max(t, 지금까지 본 시각)), 진행 중 세트 제외)을 돌려주며, routineEnd의 세션과 id가 같아 중간 저장을 덮어쓴다. routineEnd 뒤에는 최종 세션의 복사본이다. 이를 위해 `SetRunner`에 `count`(start 이후 센 반복 수)와 `heldMs`(매달린 시간, 일시정지 제외) getter를 추가했다.
 - 세트 수 `sets`는 정수가 아니면 내림(floor), 음수·NaN은 0이다. 세트가 0인 운동은 건너뛴다. 세트가 1개 이상인 운동이 없는 루틴은 생성자에서 Error.
 - 반복 0인 세트(count 0이고 heldMs 0): 건너뛰기·그만하기로 끝내면 `set(finished)` 이벤트는 나오지만 **세션에 기록하지 않는다**.
 - 끝나면 `routineEnd.session`으로 세션 기록 전체를 돌려준다. 그만하기로 끝나면 그때까지의 세트를 담아 `completed: false`로 돌려준다. 진행 중이던 세트는 그만하기 직전 1.5초 되돌림을 적용해 기록한다. 반복이 하나도 없던 세트(준비 자세 대기 중)는 기록하지 않는다. [제안]
@@ -304,3 +310,10 @@ type WorkoutSession = { id: string; routineId: string; routineName: string; star
 - **(j) CSP를 앱으로 옮긴다.** 개발 모드 완화(`style-src 'unsafe-inline'`, `connect-src ws: wss:`)를 넣는 replace가 실제로 적용되는지 검증한다. `base-uri`·`form-action`을 정한다. 자가 점검의 CSP 위반 수를 자동으로 판정한다.
 - **(k) 루틴 편집 입력 범위 검증은 앱이 한다.** 코어는 범위를 검증하지 않는다(세트 수는 floor, 음수는 0).
 - **(l) 실기기 확인 목록.** S23에서 CSP 동작, 벤치·턱걸이 실측(#6, #9), 푸시업 녹화 추가.
+
+### 10.1 결정 (2026-11-23)
+- **(c) backToReady 반복 [확정]**: "다시 자세를 잡아 주세요" 안내는 한 번만 한다. 그 뒤에는 준비 자세가 **한 번 흐트러졌다가 다시 잡혀야** 카운트다운을 다시 시작한다(서 있기만 해서는 다시 시작하지 않음).
+- **(i) 중간 저장 [확정]**: 세트가 끝날 때마다 진행 중인 세션을 저장한다. 앱이 도중에 꺼지면 그 세션은 `completed: false`(미완료)로 남는다.
+- **(f) 백그라운드 [확정]**: 운동 중 다른 앱으로 나가거나 화면이 꺼지면 자동 일시정지한다. 돌아오면 "다시 시작" 버튼으로 이어 간다.
+- **(a) [제안]** hint는 같은 진단이 1500ms 이어질 때 낸다. waitingReady에 들어간 뒤 3000ms 동안은 notReady를 내지 않는다.
+- **(b) [제안]** resume하면 idle·noStart 기준 시각을 resume 시각으로 다시 잡는다(`idleFrom = max(idleFrom + d, resumeT)`).

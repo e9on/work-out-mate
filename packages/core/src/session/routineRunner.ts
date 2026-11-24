@@ -1,6 +1,6 @@
 import type { PoseFrame } from '../types';
-import type { ExerciseId } from '../exercises/runner';
-import { SetRunner, type SetConfig, type SetEvent } from './setRunner';
+import type { ExerciseId, TrackerState } from '../exercises/runner';
+import { SetRunner, type SetConfig, type SetEvent, type SetPhase } from './setRunner';
 import type { Routine, SetLog, SetResult, Target, WorkoutSession } from './model';
 
 /** 쉬는 시간 뒤에 할 세트 */
@@ -33,6 +33,26 @@ export type RoutineRunnerOptions = {
 };
 
 export type RoutinePhase = 'set' | 'rest' | 'done';
+
+/** 화면용 현재 상태 조회 결과 */
+export type RoutineSnapshot = {
+  phase: RoutinePhase;
+  paused: boolean;
+  exerciseIndex: number;
+  setIndex: number;
+  /** 세트 중일 때만. count는 start 이후 센 반복 수(waitingReady·countdown에서는 0) */
+  set: {
+    setPhase: SetPhase;
+    tracker: TrackerState;
+    count: number;
+    heldMs: number;
+    waitingForBreak: boolean;
+    /** countdown일 때 시작까지 남은 ms, 아니면 null */
+    countdownRemainingMs: number | null;
+  } | null;
+  /** 쉬는 시간일 때만. remainingMs는 화면에서 올림 정수 초로 보여야 restTick과 맞는다 */
+  rest: { remainingMs: number; totalMs: number; next: NextSet } | null;
+};
 
 type Pos = { exerciseIndex: number; setIndex: number };
 
@@ -83,6 +103,8 @@ export class RoutineRunner {
   private prevEndT: number | null = null;
   /** 건너뛰기나 그만하기가 한 번이라도 있었다 */
   private interrupted = false;
+  /** routineEnd에서 만든 최종 세션(sessionSoFar가 끝난 뒤 복사본을 돌려준다) */
+  private final: WorkoutSession | null = null;
 
   constructor(routine: Routine, opts: RoutineRunnerOptions) {
     this.routine = routine;
@@ -194,6 +216,28 @@ export class RoutineRunner {
     return out;
   }
 
+  /**
+   * 세트 끝 버튼: 진행 중(active) 세트를 SetRunner.stop으로 끝내고(직전 반복 되돌리기 포함, endReason 'button')
+   * 목표 도달 때와 같이 쉬는 시간(마지막 세트면 routineEnd)으로 간다. 정상 진행이라 completed에는 영향이 없다.
+   * 반복이 0이면(count 0, heldMs 0) 기록하지 않는다. 세트가 시작되기 전이나 쉬는 시간이면 [].
+   * 일시정지 중이면 일시정지를 풀고 진행한다.
+   */
+  endSet(t: number): RoutineEvent[] {
+    if (this.ph !== 'set' || this.runner.phase !== 'active') return [];
+    const out = this.takePending();
+    const now = Math.max(t, this.lastT);
+    for (const ev of this.runner.stop(t, 'button')) {
+      out.push(this.wrap(ev));
+      if (ev.type !== 'finished') continue;
+      const r = ev.result;
+      if (r.count > 0 || r.heldMs > 0) this.record(r);
+      this.pausedAt = null;
+      this.lastT = now;
+      this.afterSet(r.endT, out);
+    }
+    return out;
+  }
+
   /** 루틴 전체를 끝낸다. 진행 중 세트는 SetRunner.stop으로 끝내고 반복이 있으면 기록한다. completed false */
   stop(t: number): RoutineEvent[] {
     if (this.ph === 'done') return [];
@@ -205,7 +249,68 @@ export class RoutineRunner {
     return out;
   }
 
+  /**
+   * 시각 t 기준 화면용 상태. 상태를 바꾸지 않는다(lastT도 그대로). t가 지금까지 본 시각보다 이르면 그 시각 기준,
+   * 일시정지 중이면 일시정지한 순간 기준으로 남은 쉬는 시간을 계산한다.
+   */
+  snapshot(t: number): RoutineSnapshot {
+    const base = { phase: this.ph, paused: this.paused, ...this.current };
+    if (this.ph === 'set') {
+      const r = this.runner;
+      return {
+        ...base,
+        set: {
+          setPhase: r.phase,
+          tracker: r.tracker,
+          count: r.count,
+          heldMs: r.heldMs,
+          waitingForBreak: r.waitingForBreak,
+          countdownRemainingMs: r.countdownRemainingMs(this.nowFor(t)),
+        },
+        rest: null,
+      };
+    }
+    if (this.ph === 'rest' && this.rest) {
+      const r = this.rest;
+      const remainingMs = Math.min(r.ms, this.restRemainingMs(this.nowFor(t)));
+      return { ...base, set: null, rest: { remainingMs, totalMs: r.ms, next: this.nextSet(r.next) } };
+    }
+    return { ...base, set: null, rest: null };
+  }
+
+  /**
+   * 지금까지 기록된 세트로 만든 세션(중간 저장용). completed는 항상 false, endedAt은 toEpoch(t), id는 sessionId라
+   * 나중 routineEnd의 세션이 같은 id로 덮어쓴다. 진행 중인 세트는 넣지 않는다. 끝난 뒤에는 최종 세션의 복사본.
+   */
+  sessionSoFar(t: number): WorkoutSession {
+    if (this.final) return copySession(this.final);
+    return this.makeSession(Math.max(t, this.lastT), false);
+  }
+
   // ---- 내부 ----
+
+  /** snapshot 기준 시각: 일시정지 중이면 멈춘 순간, 아니면 max(t, 지금까지 본 시각) */
+  private nowFor(t: number): number {
+    return this.pausedAt !== null ? this.pausedAt : Math.max(t, this.lastT);
+  }
+
+  /** 쉬는 시간의 남은 ms(시각 now 기준, 일시정지 누적 반영). tick·restTick·restEnd·snapshot이 같이 쓴다 */
+  private restRemainingMs(now: number): number {
+    const r = this.rest!;
+    return Math.max(0, r.ms - (now - r.t0 - r.pausedMs));
+  }
+
+  private makeSession(t: number, completed: boolean): WorkoutSession {
+    return {
+      id: this.opts.sessionId,
+      routineId: this.routine.id,
+      routineName: this.routine.name,
+      startedAt: this.toEpoch(this.opts.startT),
+      endedAt: this.toEpoch(t),
+      completed,
+      sets: this.logs.map(copyLog),
+    };
+  }
 
   private takePending(): RoutineEvent[] {
     const out = this.pending;
@@ -305,7 +410,7 @@ export class RoutineRunner {
 
   private advanceRest(t: number, out: RoutineEvent[]): void {
     const r = this.rest!;
-    const remaining = r.ms - (t - r.t0 - r.pausedMs);
+    const remaining = this.restRemainingMs(t);
     if (remaining <= 0) {
       // 큰 tick 점프로 남은 20초를 건너뛰었어도 "다음은…" 안내를 놓치지 않게 restEnd 바로 앞에서 낸다.
       this.nextUp(out);
@@ -351,15 +456,16 @@ export class RoutineRunner {
     for (let i = 0; i < this.routine.exercises.length; i++) total += this.setsOf(i);
     const completed =
       !this.interrupted && this.logs.length === total && this.logs.every((s) => s.endReason !== 'manual');
-    const session: WorkoutSession = {
-      id: this.opts.sessionId,
-      routineId: this.routine.id,
-      routineName: this.routine.name,
-      startedAt: this.toEpoch(this.opts.startT),
-      endedAt: this.toEpoch(t),
-      completed,
-      sets: this.logs.map((s) => ({ ...s, target: { ...s.target }, negativeDescentMs: [...s.negativeDescentMs] })),
-    };
+    const session = this.makeSession(t, completed);
+    this.final = copySession(session);
     out.push({ type: 'routineEnd', session });
   }
+}
+
+function copyLog(s: SetLog): SetLog {
+  return { ...s, target: { ...s.target }, negativeDescentMs: [...s.negativeDescentMs] };
+}
+
+function copySession(s: WorkoutSession): WorkoutSession {
+  return { ...s, sets: s.sets.map(copyLog) };
 }

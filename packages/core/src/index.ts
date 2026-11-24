@@ -38,5 +38,5 @@ export type {
   WorkoutSession,
 } from './session/model';
 export { RoutineRunner } from './session/routineRunner';
-export type { RoutineEvent, RoutineRunnerOptions, RoutinePhase, NextSet } from './session/routineRunner';
+export type { RoutineEvent, RoutineRunnerOptions, RoutinePhase, NextSet, RoutineSnapshot } from './session/routineRunner';
 export { recommendNext, completedCount } from './session/recommend';

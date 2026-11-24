@@ -343,7 +343,7 @@ describe('SetRunner: 프레임 끊김(tick)', () => {
 });
 
 describe('SetRunner: 일시정지', () => {
-  it('2회 뒤 10초 일시정지 → resume 뒤 4초에는 안 끝나고 5초에 idle. 일시정지 중 반복은 세지 않음', () => {
+  it('2회 직후 10초 일시정지 → resume 뒤 4초에는 안 끝나고 5초에 idle(복귀 여유). 일시정지 중 반복은 세지 않음', () => {
     const r = squat();
     const c = new Clock();
     const out = feed(r, c.frames([...hold(175, 4200), ...reps(175, 90, 2)], 'knee'));
@@ -355,7 +355,9 @@ describe('SetRunner: 일시정지', () => {
     expect(r.tick(c.t + 3000)).toEqual([]);
     const resumeT = pauseT + 10000;
     r.resume(resumeT);
-    const remain = 5000 - (pauseT - rep2T);
+    // 복귀 여유: idleFrom = max(idleFrom + d, resumeT) = resumeT(일시정지 전 흐른 약 160ms는 버린다)
+    expect(pauseT - rep2T).toBeGreaterThan(0);
+    const remain = 5000;
     c.t = resumeT;
     const after = feed(r, c.frames(hold(175, remain - 1000), 'knee'));
     expect(finishedOf(after)).toBeUndefined();
@@ -381,14 +383,15 @@ describe('SetRunner: 일시정지', () => {
 });
 
 describe('SetRunner: hint', () => {
-  it('관절이 안 보이는 30초 동안 notVisible hint가 0, 10, 20초에 한 번씩', () => {
+  it('관절이 안 보이는 30초 동안 notVisible hint가 1.5, 11.5, 21.5초에 한 번씩(지속 1500ms 뒤 첫 hint)', () => {
     const r = squat();
     const c = new Clock();
     const hidden = [LM.L_HIP, LM.R_HIP, LM.L_KNEE, LM.R_KNEE, LM.L_ANKLE, LM.R_ANKLE];
     const out = feed(r, c.frames(hold(175, 30000), 'knee', { hidden }));
     const hints = out.filter((x) => x.ev.type === 'hint');
     expect(hints.map((x) => (x.ev.type === 'hint' ? x.ev.diagnosis : ''))).toEqual(['notVisible', 'notVisible', 'notVisible']);
-    expect(hints[0]!.t).toBe(0);
+    expect(hints[0]!.t).toBeGreaterThanOrEqual(1500);
+    expect(hints[0]!.t).toBeLessThan(1500 + 40);
     // 간격은 hintRepeatMs 이상, 한 프레임(33ms) 안쪽. 프레임 격자 때문에 회마다 조금씩 늦어진다.
     for (const [a, b] of [[0, 1], [1, 2]] as const) {
       expect(hints[b]!.t - hints[a]!.t).toBeGreaterThanOrEqual(10000);
@@ -511,7 +514,7 @@ describe('SetRunner: 수정 1회차', () => {
     });
   });
 
-  it('start 뒤 pause 5초 → resume: backToReady가 5초 늦어진다', () => {
+  it('start 뒤 pause 5초 → resume: backToReady는 resume 시각 + 20초(복귀 여유)', () => {
     const r = squat();
     const c = new Clock();
     const out: Timed[] = [];
@@ -521,8 +524,8 @@ describe('SetRunner: 수정 1회차', () => {
     tickTo(r, startT + 6000, startT + 26000, 10, out);
     const back = first(out, 'backToReady')!;
     expect(back).toBeDefined();
-    expect(back.t - startT).toBeGreaterThanOrEqual(25000);
-    expect(back.t - startT).toBeLessThan(25000 + 10);
+    expect(back.t - startT).toBeGreaterThanOrEqual(26000);
+    expect(back.t - startT).toBeLessThan(26000 + 10);
   });
 
   describe('카운트다운 길이', () => {
@@ -686,8 +689,314 @@ describe('SetRunner: 수정 1회차', () => {
     squatToActive(r, c, out);
     feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
     expect(first(out, 'backToReady')).toBeDefined();
+    // 10.1(c): 준비 자세가 한 번 흐트러져야(여기서는 다리가 안 보이는 400ms 이상) 다시 시작한다.
+    const hidden = [LM.L_HIP, LM.R_HIP, LM.L_KNEE, LM.R_KNEE, LM.L_ANKLE, LM.R_ANKLE];
+    feed(r, c.frames(hold(175, 500), 'knee', { hidden }));
     const after = feed(r, c.frames([...hold(175, 4200), ...oneRep(175, 90)], 'knee'));
     expect(types(after).filter((t) => t === 'start')).toHaveLength(1);
     expect(repCounts(after)).toEqual([1]);
+  });
+});
+
+describe('SetRunner: 2b 보강 (spec 10 (a)(b)(c))', () => {
+  const HIDDEN_LEGS = [LM.L_HIP, LM.R_HIP, LM.L_KNEE, LM.R_KNEE, LM.L_ANKLE, LM.R_ANKLE];
+  const HANG = { wristAboveNose: true } as const;
+  const hints = (xs: Timed[]) => xs.filter((x) => x.ev.type === 'hint');
+  const diagOf = (x: Timed) => (x.ev.type === 'hint' ? x.ev.diagnosis : '');
+
+  describe('(a) hint 지속 시간', () => {
+    it('같은 진단(notVisible)이 1400ms 이어지면 hint 없음, 1500ms 이어지면 hint 1번', () => {
+      const r = squat();
+      const c = new Clock();
+      const out = feed(r, c.frames(hold(175, 1400), 'knee', { hidden: HIDDEN_LEGS }));
+      expect(c.t - DT).toBeLessThan(1500);
+      expect(hints(out)).toEqual([]);
+      feed(r, c.frames(hold(175, 300), 'knee', { hidden: HIDDEN_LEGS }), out);
+      const hs = hints(out);
+      expect(hs).toHaveLength(1);
+      expect(diagOf(hs[0]!)).toBe('notVisible');
+      expect(hs[0]!.t).toBeGreaterThanOrEqual(1500);
+      expect(hs[0]!.t).toBeLessThan(1500 + 40);
+    });
+
+    it('중간에 1프레임 ok가 끼면 처음부터 다시 잰다', () => {
+      const r = squat();
+      const c = new Clock();
+      const out = feed(r, c.frames(hold(175, 1000), 'knee', { hidden: HIDDEN_LEGS }));
+      feed(r, c.frames([175], 'knee'), out); // ok 1프레임
+      const okT = c.t; // 다음 notVisible 프레임부터 다시 잰다
+      feed(r, c.frames(hold(175, 1400), 'knee', { hidden: HIDDEN_LEGS }), out);
+      expect(hints(out)).toEqual([]);
+      feed(r, c.frames(hold(175, 300), 'knee', { hidden: HIDDEN_LEGS }), out);
+      const hs = hints(out);
+      expect(hs).toHaveLength(1);
+      expect(hs[0]!.t - okT).toBeGreaterThanOrEqual(1500);
+      expect(hs[0]!.t - okT).toBeLessThan(1500 + 40);
+    });
+
+    it('waitingReady에 들어간 뒤 2900ms 동안은 notReady가 이어져도 hint가 없고, 3000+1500ms 이후에는 나온다', () => {
+      const r = squat();
+      const c = new Clock();
+      // 몸통이 수평이면 서 있는 준비 자세가 아니다(신호는 보이므로 notReady).
+      const out = feed(r, c.frames(hold(175, 2900), 'knee', { torso: 'flat' }));
+      expect(r.tracker.diagnosis).toBe('notReady');
+      expect(hints(out)).toEqual([]);
+      feed(r, c.frames(hold(175, 4500 - 2900 - 100), 'knee', { torso: 'flat' }), out);
+      expect(c.t - DT).toBeLessThan(4500);
+      expect(hints(out)).toEqual([]);
+      feed(r, c.frames(hold(175, 300), 'knee', { torso: 'flat' }), out);
+      const hs = hints(out);
+      expect(hs).toHaveLength(1);
+      expect(diagOf(hs[0]!)).toBe('notReady');
+      expect(hs[0]!.t).toBeGreaterThanOrEqual(4500);
+      expect(hs[0]!.t).toBeLessThan(4500 + 40);
+    });
+
+    it('notVisible에는 유예가 없다: waitingReady 처음부터 1500ms 규칙만', () => {
+      const r = squat();
+      const c = new Clock();
+      const out = feed(r, c.frames(hold(175, 2000), 'knee', { hidden: HIDDEN_LEGS }));
+      const hs = hints(out);
+      expect(hs.map(diagOf)).toEqual(['notVisible']);
+      expect(hs[0]!.t).toBeLessThan(1500 + 40);
+    });
+
+    it('backToReady 뒤에도 notReady 유예는 waitingReady에 들어간 시각부터 잰다', () => {
+      const r = squat();
+      const c = new Clock();
+      const out: Timed[] = [];
+      squatToActive(r, c, out);
+      feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
+      const backT = first(out, 'backToReady')!.t;
+      c.t = backT + DT; // frames()가 21초치를 미리 만들어 시계가 앞서 있으므로 backToReady 바로 뒤로 되돌린다
+      const after = feed(r, c.frames(hold(175, 4400), 'knee', { torso: 'flat' }));
+      expect(hints(after)).toEqual([]);
+      feed(r, c.frames(hold(175, 300), 'knee', { torso: 'flat' }), after);
+      const hs = hints(after);
+      expect(hs.map(diagOf)).toEqual(['notReady']);
+      expect(hs[0]!.t - backT).toBeGreaterThanOrEqual(4500);
+      expect(hs[0]!.t - backT).toBeLessThan(4500 + 40);
+    });
+  });
+
+  describe('(b) resume 복귀 여유', () => {
+    it('반복 2회 → 4초 → pause 10초 → resume: resume 뒤 4999ms까지 idle 없음, 5000ms에 idle', () => {
+      const r = squat();
+      const c = new Clock();
+      const out = feed(r, c.frames([...hold(175, 4200), ...reps(175, 90, 2)], 'knee'));
+      const rep2T = out.filter((x) => x.ev.type === 'rep').at(-1)!.t;
+      const pauseT = rep2T + 4000;
+      expect(r.tick(pauseT)).toEqual([]);
+      r.pause(pauseT);
+      const resumeT = pauseT + 10000;
+      r.resume(resumeT);
+      expect(r.tick(resumeT + 1000)).toEqual([]);
+      expect(r.tick(resumeT + 4999)).toEqual([]);
+      const evs = r.tick(resumeT + 5000);
+      expect(evs.map((e) => e.type)).toEqual(['finished']);
+      expect(evs[0]!.type === 'finished' && evs[0]!.reason).toBe('idle');
+      expect(r.result!.count).toBe(2);
+    });
+
+    it('noStart도 같다: start → 4초 → pause 10초 → resume: resume 뒤 19999ms까지 backToReady 없음, 20000ms에 backToReady', () => {
+      const r = squat();
+      const c = new Clock();
+      const out: Timed[] = [];
+      const startT = squatToActive(r, c, out);
+      const pauseT = startT + 4000;
+      expect(r.tick(pauseT)).toEqual([]);
+      r.pause(pauseT);
+      const resumeT = pauseT + 10000;
+      r.resume(resumeT);
+      expect(r.tick(resumeT + 19999)).toEqual([]);
+      expect(r.tick(resumeT + 20000).map((e) => e.type)).toEqual(['backToReady']);
+    });
+  });
+
+  describe('(c) backToReady 뒤 다시 시작 규칙', () => {
+    it('squat: backToReady 뒤 서 있기만 1분 → countdown·start·backToReady 없음. 흐트러졌다가 다시 준비 자세 → 보정 → countdown → start', () => {
+      const r = squat();
+      const c = new Clock();
+      const out: Timed[] = [];
+      squatToActive(r, c, out);
+      feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
+      expect(types(out).filter((t) => t === 'backToReady')).toHaveLength(1);
+      const stand = feed(r, c.frames(hold(175, 60000), 'knee'));
+      tickTo(r, c.t, c.t + 1000, 100, stand);
+      expect(types(stand)).not.toContain('countdown');
+      expect(types(stand)).not.toContain('start');
+      expect(types(stand)).not.toContain('backToReady');
+      expect(r.phase).toBe('waitingReady');
+      // 신호 null 400ms 이상(흐트러짐) → 다시 준비 자세
+      c.t += 2000;
+      const again = feed(r, c.frames(hold(175, 500), 'knee', { hidden: HIDDEN_LEGS }));
+      feed(r, c.frames(hold(175, 4500), 'knee'), again);
+      expect(types(again).filter((t) => t !== 'hint')).toEqual(['countdown', 'countdown', 'countdown', 'start']);
+      expect(r.phase).toBe('active');
+    });
+
+    it('squat: ready false(몸통 수평)로 흐트러져도 다시 시작한다', () => {
+      const r = squat();
+      const c = new Clock();
+      const out: Timed[] = [];
+      squatToActive(r, c, out);
+      feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
+      const stand = feed(r, c.frames(hold(175, 10000), 'knee'));
+      expect(types(stand)).not.toContain('start');
+      const again = feed(r, c.frames(hold(175, 500), 'knee', { torso: 'flat' }));
+      feed(r, c.frames(hold(175, 4500), 'knee'), again);
+      expect(types(again).filter((t) => t !== 'hint')).toEqual(['countdown', 'countdown', 'countdown', 'start']);
+    });
+
+    it('pullup: 매달린 채 20초 → backToReady → 계속 매달림 → start 없음 → 400ms 이상 내려왔다가 다시 매달림 300ms → start', () => {
+      const r = new SetRunner({ exercise: 'pullup', target: { kind: 'reps', reps: 5 } });
+      const c = new Clock();
+      const out = feed(r, c.frames(hold(170, 500), 'elbow', HANG), [], (e) => e.type === 'start');
+      const startT = first(out, 'start')!.t;
+      feed(r, c.frames(hold(170, 21000), 'elbow', HANG), out, (e) => e.type === 'backToReady');
+      const back = first(out, 'backToReady')!;
+      expect(back.t - startT).toBeGreaterThanOrEqual(20000);
+      const still = feed(r, c.frames(hold(170, 30000), 'elbow', HANG));
+      expect(types(still)).not.toContain('start');
+      expect(types(still)).not.toContain('backToReady');
+      expect(r.phase).toBe('waitingReady');
+      feed(r, c.frames(hold(170, 500), 'elbow'), still); // 내려옴(startPose false, 400ms 이상)
+      const hangT = c.t;
+      feed(r, c.frames(hold(170, 600), 'elbow', HANG), still);
+      const s = first(still, 'start')!;
+      expect(s).toBeDefined();
+      expect(s.t - hangT).toBeGreaterThanOrEqual(300);
+      expect(s.t - hangT).toBeLessThan(300 + 40);
+    });
+  });
+});
+
+describe('SetRunner: 작업 1 수정 1회차 (흐트러짐 400ms·스쿼트 굽힘·ready null·waitingForBreak)', () => {
+  const HIDDEN_LEGS = [LM.L_HIP, LM.R_HIP, LM.L_KNEE, LM.R_KNEE, LM.L_ANKLE, LM.R_ANKLE];
+  const HIDDEN_SHOULDERS = [LM.L_SHOULDER, LM.R_SHOULDER];
+
+  /** squat: start → 20초 반복 없음 → backToReady. 시계는 backToReady 바로 뒤로 맞춘다 */
+  function squatBack(): { r: SetRunner; c: Clock } {
+    const r = squat();
+    const c = new Clock();
+    const out: Timed[] = [];
+    squatToActive(r, c, out);
+    feed(r, c.frames(hold(175, 21000), 'knee'), out, (e) => e.type === 'backToReady');
+    c.t = first(out, 'backToReady')!.t + DT;
+    return { r, c };
+  }
+  /** 첫 프레임 t0부터 마지막 프레임 t0+spanMs까지(DT 간격, 마지막은 정확히 t0+spanMs) 흐트러진 프레임 */
+  function brokenSpan(c: Clock, spanMs: number, opts: Extra = { hidden: HIDDEN_LEGS }, knee = 175): PoseFrame[] {
+    const t0 = c.t;
+    const ts: number[] = [];
+    for (let t = t0; t < t0 + spanMs; t += DT) ts.push(t);
+    ts.push(t0 + spanMs);
+    c.t = t0 + spanMs + DT;
+    return ts.map((t) => buildPose({ ...opts, t, knee }));
+  }
+  const standThenStarts = (r: SetRunner, c: Clock) => types(feed(r, c.frames(hold(175, 4500), 'knee'))).includes('start');
+
+  it('waitingForBreak: 처음 false, backToReady 뒤 서 있으면 true이고 시작 없음', () => {
+    expect(squat().waitingForBreak).toBe(false);
+    const { r, c } = squatBack();
+    expect(r.waitingForBreak).toBe(true);
+    expect(standThenStarts(r, c)).toBe(false);
+    expect(r.waitingForBreak).toBe(true);
+  });
+
+  it('1프레임 흐트러짐(visibility 깜빡임)으로는 다시 시작하지 않는다', () => {
+    const { r, c } = squatBack();
+    feed(r, c.frames([175], 'knee', { hidden: HIDDEN_LEGS }));
+    expect(standThenStarts(r, c)).toBe(false);
+    expect(r.waitingForBreak).toBe(true);
+  });
+
+  it('399ms 흐트러짐으로는 다시 시작하지 않는다', () => {
+    const { r, c } = squatBack();
+    feed(r, brokenSpan(c, 399));
+    expect(r.waitingForBreak).toBe(true);
+    expect(standThenStarts(r, c)).toBe(false);
+  });
+
+  it('400ms 흐트러짐 → 다시 준비 자세 → 보정 → countdown → start', () => {
+    const { r, c } = squatBack();
+    feed(r, brokenSpan(c, 400));
+    expect(r.waitingForBreak).toBe(false);
+    const again = feed(r, c.frames(hold(175, 4500), 'knee'));
+    expect(types(again).filter((t) => t !== 'hint')).toEqual(['countdown', 'countdown', 'countdown', 'start']);
+  });
+
+  it('흐트러짐 중간에 흐트러지지 않은 프레임이 하나 끼면 처음부터 다시 잰다', () => {
+    const { r, c } = squatBack();
+    feed(r, brokenSpan(c, 300));
+    feed(r, c.frames([175], 'knee'));
+    feed(r, brokenSpan(c, 300));
+    expect(r.waitingForBreak).toBe(true);
+  });
+
+  it('squat: 무릎 120°(minBaseline 150 미만)로 400ms 이상 → 흐트러짐 인정 → 다시 서서 보정 → start', () => {
+    const { r, c } = squatBack();
+    feed(r, c.frames(hold(120, 500), 'knee'));
+    expect(r.waitingForBreak).toBe(false);
+    const again = feed(r, c.frames(hold(175, 4500), 'knee'));
+    expect(types(again).filter((t) => t !== 'hint')).toEqual(['countdown', 'countdown', 'countdown', 'start']);
+  });
+
+  it('squat: 무릎 155°(minBaseline 이상)는 흐트러짐이 아니다', () => {
+    const { r, c } = squatBack();
+    feed(r, c.frames(hold(155, 1000), 'knee'));
+    expect(r.waitingForBreak).toBe(true);
+  });
+
+  it('ready null(어깨가 화면 밖, 다리는 보임)로 400ms 이상 → 흐트러짐 인정', () => {
+    const { r, c } = squatBack();
+    feed(r, c.frames(hold(175, 500), 'knee', { hidden: HIDDEN_SHOULDERS }));
+    expect(r.waitingForBreak).toBe(false);
+  });
+
+  it('흐트러짐을 기다리는 동안에는 hint가 나오지 않는다', () => {
+    const { r, c } = squatBack();
+    const out = feed(r, c.frames(hold(175, 15000), 'knee'));
+    expect(types(out)).not.toContain('hint');
+  });
+
+  it('흐트러짐을 기다리는 중 pause → resume(직접 누른 다시 시작)이면 기다림을 푼다', () => {
+    const { r, c } = squatBack();
+    expect(r.waitingForBreak).toBe(true);
+    r.pause(c.t);
+    r.resume(c.t + 3000);
+    c.t += 3000;
+    expect(r.waitingForBreak).toBe(false);
+    expect(standThenStarts(r, c)).toBe(true);
+  });
+});
+
+describe('SetRunner: count·heldMs 조회 (2b 작업 2)', () => {
+  it('reps: start 전 0, start 뒤 센 반복 수, 끝난 뒤에도 결과와 같다. heldMs는 0', () => {
+    const r = new SetRunner({ exercise: 'squat', target: { kind: 'reps', reps: 3 }, countdownMs: 0 });
+    expect(r.count).toBe(0);
+    expect(r.heldMs).toBe(0);
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 1000), ...reps(175, 90, 2)], 'knee'));
+    expect(types(out).filter((t) => t === 'rep')).toHaveLength(2);
+    expect(r.count).toBe(2);
+    expect(r.heldMs).toBe(0);
+    feed(r, c.frames([...reps(175, 90, 1), ...hold(175, 3000)], 'knee'), out, (e) => e.type === 'finished');
+    expect(r.phase).toBe('finished');
+    expect(r.count).toBe(r.result!.count);
+    expect(r.count).toBe(3);
+  });
+
+  it('deadHang: heldMs는 매달린 시간(일시정지 제외), count는 0', () => {
+    const r = new SetRunner({ exercise: 'deadHang', target: { kind: 'seconds', seconds: 30 } });
+    expect(r.heldMs).toBe(0);
+    const c = new Clock();
+    feed(r, c.frames(hold(170, 500), 'elbow'));
+    feed(r, c.frames(hold(170, 3000), 'elbow', { wristAboveNose: true } as const));
+    expect(r.count).toBe(0);
+    expect(Math.abs(r.heldMs - 3000)).toBeLessThanOrEqual(400);
+    const h = r.heldMs;
+    r.pause(c.t);
+    expect(r.heldMs).toBe(h);
   });
 });

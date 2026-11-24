@@ -1,0 +1,47 @@
+{
+  "name": "@wom/app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "copy-wasm": "node scripts/copy-wasm.mjs",
+    "android:build": "npm run copy-wasm && npm run build && npx cap sync android",
+    "typecheck:electron": "tsc -p electron --noEmit",
+    "electron:build": "npm run typecheck:electron && node scripts/electron-build.mjs",
+    "electron:dev": "npm run copy-wasm && npm run build && npm run electron:build && electron .",
+    "electron:pack": "npm run copy-wasm && npm run build && npm run electron:build && node scripts/electron-pack.mjs"
+  },
+  "dependencies": {
+    "@capacitor-community/keep-awake": "^8.0.1",
+    "@capacitor-community/text-to-speech": "^8.0.2",
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@mediapipe/tasks-vision": "1.2",
+    "@wom/core": "*",
+    "idb": "^8.0.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2",
+    "@electron/packager": "20.3.0",
+    "@testing-library/jest-dom": "^8.0.0",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^26.6.6",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "45.2.2",
+    "esbuild": "0.28.2",
+    "fake-indexeddb": "^6.2.8",
+    "jsdom": "^31.0.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "main": "electron-dist/main.cjs"
+}
