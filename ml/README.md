@@ -13,3 +13,43 @@
 - 교체 전 `pip list`: `torch 2.11.0`(CPU판, `2.11.0+cpu`), `torchvision 0.26.0`
 - 교체 후 `pip list`: `torch 2.11.0+cu126`, `torchvision 0.26.0+cu126`
 - 구형 pip(22.3)가 `--index-url`만 쓰면 빌드 의존성(flit_core)을 못 찾아 실패하므로 `--no-deps`로 설치한다(의존성은 PyPI에서 따로 설치).
+
+## 데이터·가중치
+
+받기: `python ml/scripts/fetch_data.py` (저장소 루트에서). 이미 받은 폴더는 다시 받지 않는다. 데이터·가중치·코드는 모두 git 제외(`.gitignore`).
+테스트: `python -m pytest ml/tests/test_fetch.py` (네트워크 없이).
+
+### Zenodo 스쿼트 (`ml/data/raw/zenodo/`)
+
+- 레코드 18859797, CC BY 4.0, MediaPipe 33점 2D 좌표+가시성 CSV. 최신 버전은 레코드 19550070(파일이 더 많음)이지만 **원래 레코드 18859797 그대로** 받았다.
+- 파일(MD5는 Zenodo 값과 일치 확인, SHA256은 직접 계산):
+
+| 파일 | 크기(바이트) | SHA256 |
+|---|---|---|
+| 00_Standard.zip | 18,038,210 | 2a7ca77dadd8ece3a1a7ec4e33fa313a6735c7b354c196395c69b26113597552 |
+| 01_Err_Shallow.zip | 2,408,003 | 052feb313b6cd5f58a9d1909887fe738aac9bde627ffbbc877766d995f5efffa |
+| 02_Err_GoodMorning.zip | 21,351,834 | 2cb84051442a3a10fa23711b6afe1eca0085a30ce5a28409f7479e66419f70e5 |
+
+- 02 zip은 00·01 전체의 사본을 포함한다(합집합이므로 중복 주의). 고유 CSV는 표준 193 + 얕은 스쿼트 23 + 굿모닝 10 = 226개.
+
+### EC3D (`ml/data/raw/ec3d/`)
+
+- 출처: GitHub Jacoo-Zhao/3D-Pose-Based-Feedback-For-Physical-Exercises README의 Google Drive 폴더(gdown). 받은 날 2026-11-25.
+
+| 파일 | 크기(바이트) | SHA256 |
+|---|---|---|
+| data_3D.pickle | 21,448,352 | a05c8b4f55f2f43637d2d6cbf40722807ea780f47e84090470bd100c927ebbdf |
+| data.pickle | 961,198,097 | 0f6e7f86c67ba1eee320f209bd727cff022a0c079bcd06d30e1a2eb6fc77e92c |
+
+### MotionBERT 코드 (`ml/third_party/MotionBERT/`)
+
+- https://github.com/Walter0807/MotionBERT, 커밋 `705d3a95354db8bdb696b3492e47a3b5537174ff`("Update mesh.md")로 고정(detached HEAD).
+
+### MotionBERT-Lite 사전학습 가중치 (`ml/weights/`) - 수동으로 받아야 함
+
+OneDrive가 자동 다운로드를 막는다(403). 브라우저로 직접 받아 `ml/weights/`에 넣는다.
+
+1. 링크(MotionBERT README의 `MotionBERT-Lite (61MB)` 행): https://1drv.ms/f/s!AvAdh0LSjEOlgS27Ydcbpxlkl0ng?e=rq2Btn
+2. 폴더 안의 체크포인트(`.bin`, 약 61MB)를 받는다.
+3. `ml/weights/motionbert_lite.bin`으로 두거나(권장) 받은 파일명 그대로 두고 아래에 기록한다.
+4. 받은 뒤 크기·SHA256을 이 절에 적는다: `(미기록)`
