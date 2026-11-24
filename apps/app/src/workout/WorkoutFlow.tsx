@@ -10,6 +10,8 @@ import { useWorkout } from './useWorkout';
 import { createMediapipePose } from '../platform/mediapipePose';
 import { createSpeech } from '../platform/createSpeech';
 import { createKeepAwake } from '../platform/keepAwake';
+import { applyRetention, type ClipCutter } from '../form/retention';
+import { createClipCutter } from '../platform/clipCutter';
 import { Workout } from '../screens/Workout';
 import { Rest } from '../screens/Rest';
 import { Summary } from '../screens/Summary';
@@ -29,6 +31,8 @@ export type WorkoutFlowProps = {
   analysisQueue?: AnalysisQueue;
   onHome: () => void;
   deps?: WorkoutFlowDeps;
+  /** 테스트 주입용. 없으면 실제 클립 자르개 */
+  clipCutter?: ClipCutter;
 };
 
 /** 첫 렌더에서 한 번만 만든다(useWorkout도 mount 때 deps만 쓴다) */
@@ -69,7 +73,7 @@ function buildDeps(
  * ended → Summary, cameraError → 오류 화면, rest → Rest, 그 밖에는 Workout(+ Placement 겹침).
  * 카메라 <video>는 화면이 바뀌어도 같은 요소를 쓰도록 늘 마운트해 둔다(다른 화면은 그 위를 덮는다).
  */
-export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHome, deps }: WorkoutFlowProps) {
+export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHome, deps, clipCutter }: WorkoutFlowProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [d] = useState(() =>
     buildDeps(routine, storage, deps, mediaStore, analysisQueue, () => {
@@ -84,6 +88,15 @@ export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHom
     analysisQueue?.setBusy(setBusy);
   }, [analysisQueue, setBusy]);
   useEffect(() => () => analysisQueue?.setBusy(false), [analysisQueue]);
+
+  // 세션이 최종 저장된 뒤 한 번, 오래된 영상을 정리한다(실패해도 화면은 그대로)
+  const retained = useRef(false);
+  const ended = !!view?.ended;
+  useEffect(() => {
+    if (!ended || !mediaStore || retained.current) return;
+    retained.current = true;
+    applyRetention({ storage, store: mediaStore, cutter: clipCutter ?? createClipCutter() }).catch((e) => console.warn('영상 정리 실패', e));
+  }, [ended, mediaStore, storage, clipCutter]);
 
   // 결과 화면에서 다시 보기를 누르면 그 위에 재생 화면을 겹쳐 띄운다
   const [player, setPlayer] = useState<{ setKey: SetKey; index: number } | null>(null);
