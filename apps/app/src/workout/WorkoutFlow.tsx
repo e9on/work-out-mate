@@ -35,8 +35,8 @@ export type WorkoutFlowProps = {
   clipCutter?: ClipCutter;
 };
 
-/** 첫 렌더에서 한 번만 만든다(useWorkout도 mount 때 deps만 쓴다) */
-function buildDeps(
+/** 첫 렌더에서 한 번만 만든다(useWorkout도 mount 때 deps만 쓴다). 테스트용으로 내보낸다 */
+export function buildDeps(
   routine: Routine,
   storage: Storage,
   d: WorkoutFlowDeps = {},
@@ -45,11 +45,14 @@ function buildDeps(
   getStream: () => MediaStream | null = () => null,
 ): EngineDeps {
   const epochOffset = d.epochOffset ?? Date.now() - performance.now();
+  const now = d.now ?? (() => performance.now());
   let capture: SetCapture | undefined = d.capture;
   if (!capture && mediaStore) {
     capture = createSetCapture({
       store: mediaStore,
-      recorder: createMediaRecorder(getStream, () => Date.now()),
+      // 반복 시각·상자 시각(now + epochOffset)과 같은 시계로 녹화 시작 시각을 잰다.
+      // Date.now()를 따로 쓰면 절전·시각 보정 때 둘이 벌어져 영상 위치가 어긋난다
+      recorder: createMediaRecorder(getStream, () => now() + epochOffset),
       onSaved: (key) => analysisQueue?.enqueue(key),
     });
   }
@@ -59,7 +62,7 @@ function buildDeps(
     pose: d.pose ?? createMediapipePose(),
     speech: d.speech ?? createSpeech(),
     keepAwake: d.keepAwake ?? createKeepAwake(),
-    now: d.now ?? (() => performance.now()),
+    now,
     epochOffset,
     newId: d.newId ?? (() => crypto.randomUUID()),
     setInterval: d.setInterval ?? ((cb, ms) => window.setInterval(cb, ms)),
