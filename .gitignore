@@ -5,6 +5,7 @@ dist/
 android/build/
 apps/spike/public/mediapipe/
 apps/app/public/mediapipe/
+apps/app/public/form/
 apps/spike/out/
 apps/spike/electron-dist/
 apps/app/out/
