@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { Routine } from '@wom/core';
 import type { Storage } from './ports/storage';
+import type { MediaStore } from './ports/mediaStore';
+import { createIdbMediaStore } from './storage/idbMediaStore';
 import { createIdbStorage } from './storage/idbStorage';
 import { Home } from './screens/Home';
 import { RoutineEdit } from './screens/RoutineEdit';
@@ -16,10 +18,11 @@ type Screen =
   | { kind: 'detail'; sessionId: string }
   | { kind: 'workout'; routine: Routine };
 
-export type AppProps = { storage?: Storage; workoutDeps?: WorkoutFlowDeps };
+export type AppProps = { storage?: Storage; mediaStore?: MediaStore; workoutDeps?: WorkoutFlowDeps };
 
-export function App({ storage: injected, workoutDeps }: AppProps = {}) {
+export function App({ storage: injected, mediaStore: injectedMedia, workoutDeps }: AppProps = {}) {
   const [storage] = useState<Storage>(() => injected ?? createIdbStorage());
+  const [mediaStore] = useState<MediaStore>(() => injectedMedia ?? createIdbMediaStore());
   const [screen, setScreen] = useState<Screen>({ kind: 'home' });
   const [nextOrder, setNextOrder] = useState(0);
   const home = () => setScreen({ kind: 'home' });
@@ -45,7 +48,7 @@ export function App({ storage: injected, workoutDeps }: AppProps = {}) {
     case 'detail':
       return <SessionDetail storage={storage} sessionId={screen.sessionId} onBack={() => setScreen({ kind: 'history' })} />;
     case 'workout':
-      return <WorkoutFlow key={screen.routine.id} routine={screen.routine} storage={storage} onHome={home} deps={workoutDeps} />;
+      return <WorkoutFlow key={screen.routine.id} routine={screen.routine} storage={storage} mediaStore={mediaStore} onHome={home} deps={workoutDeps} />;
     default:
       return (
         <Home

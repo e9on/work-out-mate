@@ -1,9 +1,10 @@
-import { RoutineRunner, type Routine, type RoutineEvent, type RoutineSnapshot, type WorkoutSession } from '@wom/core';
+import { RoutineRunner, type PoseFrame, type Routine, type RoutineEvent, type RoutineSnapshot, type WorkoutSession } from '@wom/core';
 import { CameraError, type PoseSource } from '../ports/pose';
 import type { Speech } from '../ports/speech';
 import type { KeepAwake } from '../ports/keepAwake';
 import type { Storage } from '../ports/storage';
 import { phraseFor } from '../domain/phrases';
+import type { SetCapture } from '../form/setCapture';
 
 export type EngineDeps = {
   routine: Routine;
@@ -18,6 +19,8 @@ export type EngineDeps = {
   newId: () => string;
   setInterval: (cb: () => void, ms: number) => unknown;
   clearInterval: (h: unknown) => void;
+  /** 스쿼트 세트 영상 녹화·사람 상자 수집(없으면 아무것도 하지 않는다) */
+  capture?: SetCapture;
 };
 
 export type EngineView = RoutineSnapshot & {
@@ -25,6 +28,10 @@ export type EngineView = RoutineSnapshot & {
   lastEvents: RoutineEvent[];
   cameraError: CameraError['kind'] | null;
   ended: WorkoutSession | null;
+};
+
+const captureWarn = (e: unknown): void => {
+  console.warn('세트 녹화 실패', e);
 };
 
 /** 프레임이 없을 때도 시간을 흘리는 tick 간격 */
@@ -44,6 +51,7 @@ const TICK_MS = 200;
 export class WorkoutEngine {
   private readonly d: EngineDeps;
   private readonly runner: RoutineRunner;
+  private readonly sessionId: string;
   private readonly subs = new Set<(v: EngineView) => void>();
 
   private lastEvents: RoutineEvent[] = [];
@@ -58,12 +66,17 @@ export class WorkoutEngine {
   private unsubFrame: (() => void) | null = null;
   /** 저장을 순서대로 잇는 사슬(늘 resolve한다) */
   private saving: Promise<void> = Promise.resolve();
+  /** capture.beginSession을 불렀다 */
+  private captureSessionBegun = false;
+  /** 스쿼트 세트가 capture에 열려 있다 */
+  private captureSetOpen = false;
 
   constructor(d: EngineDeps) {
     this.d = d;
+    this.sessionId = d.newId();
     this.runner = new RoutineRunner(d.routine, {
       startT: d.now(),
-      sessionId: d.newId(),
+      sessionId: this.sessionId,
       toEpoch: (t) => t + d.epochOffset,
       // 세트는 목표 도달이나 세트 끝 버튼으로만 끝낸다(마지막 반복 뒤 멈춤으로 끝내지 않는다. 2026-11-24 실기기 확인 뒤 결정)
       set: { idleEndMs: Infinity },
@@ -116,7 +129,9 @@ export class WorkoutEngine {
       return;
     }
     this.live = true;
+    this.beginCaptureSession();
     this.unsubFrame = this.d.pose.onFrame((f) => {
+      this.captureFrame(f);
       const evs = this.runner.push(f);
       if (evs.length > 0) void this.handle(evs);
     });
@@ -181,6 +196,7 @@ export class WorkoutEngine {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.closeCaptureSet(false);
     this.teardown();
     try {
       this.d.speech.cancel();
@@ -207,6 +223,7 @@ export class WorkoutEngine {
     let saveMid = false;
     const texts: string[] = [];
     for (const e of evs) {
+      this.captureEvent(e);
       const text = phraseFor(e, { routine: this.d.routine });
       if (text !== null) texts.push(text);
       if (e.type === 'set' && e.event.type === 'finished') {
@@ -226,6 +243,57 @@ export class WorkoutEngine {
     }
     this.notify(evs);
     return this.saving;
+  }
+
+  // ---- 세트 녹화(실패해도 운동 흐름을 깨지 않는다) ----
+
+  private beginCaptureSession(): void {
+    const c = this.d.capture;
+    if (!c || this.captureSessionBegun) return;
+    this.captureSessionBegun = true;
+    try {
+      void c.beginSession({ sessionId: this.sessionId, routineId: this.d.routine.id }).catch(captureWarn);
+    } catch (e) {
+      captureWarn(e);
+    }
+  }
+
+  private captureFrame(f: PoseFrame): void {
+    if (!this.captureSetOpen) return;
+    try {
+      this.d.capture?.addFrame(f, f.t + this.d.epochOffset);
+    } catch (e) {
+      captureWarn(e);
+    }
+  }
+
+  private captureEvent(e: RoutineEvent): void {
+    const c = this.d.capture;
+    if (!c || e.type !== 'set') return;
+    if (e.event.type === 'start') {
+      if (this.d.routine.exercises[e.exerciseIndex]?.exercise !== 'squat') return;
+      this.closeCaptureSet(false);
+      this.captureSetOpen = true;
+      try {
+        c.beginSet(e.exerciseIndex, e.setIndex);
+      } catch (err) {
+        captureWarn(err);
+      }
+    } else if (e.event.type === 'finished' && this.captureSetOpen) {
+      const r = e.event.result;
+      this.closeCaptureSet(r.count > 0);
+    }
+  }
+
+  /** 열린 세트를 닫는다. keep=false면 저장하지 않는다 */
+  private closeCaptureSet(keep: boolean): void {
+    if (!this.captureSetOpen) return;
+    this.captureSetOpen = false;
+    try {
+      void this.d.capture?.endSet(keep).catch(captureWarn);
+    } catch (e) {
+      captureWarn(e);
+    }
   }
 
   private say(text: string): void {

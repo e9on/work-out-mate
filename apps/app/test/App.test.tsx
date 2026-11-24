@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { createMemoryStorage } from '../src/storage/memoryStorage';
+import { createMemoryMediaStore } from '../src/storage/memoryMediaStore';
 import { makeFakeWorkout } from './fakeWorkout';
 
 describe('App', () => {
@@ -25,7 +26,7 @@ describe('App', () => {
   it('시작하면 운동 화면(WorkoutFlow)이 뜨고, 그만하기 → 완료 화면 → 홈으로 돌아온다', async () => {
     const storage = createMemoryStorage();
     const fw = makeFakeWorkout();
-    render(<App storage={storage} workoutDeps={fw.deps} />);
+    render(<App storage={storage} mediaStore={createMemoryMediaStore()} workoutDeps={fw.deps} />);
     fireEvent.click(await screen.findByRole('button', { name: '루틴 만들기' }));
     fireEvent.change(screen.getByLabelText('루틴 이름'), { target: { value: '아침 루틴' } });
     fireEvent.change(screen.getByLabelText('추가할 운동'), { target: { value: 'squat' } });
