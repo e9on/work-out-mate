@@ -69,6 +69,7 @@ body {
 
 .home button,
 .history button,
+.settings button,
 .session-detail button {
   font: inherit;
   padding: 8px 12px;
@@ -411,4 +412,40 @@ body {
 }
 .player-status {
   margin: 24px 0;
+}
+
+.dialog {
+  max-width: 400px;
+  max-height: 100%;
+  overflow-y: auto;
+}
+.dialog-title {
+  margin: 0;
+}
+.consent-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 16px 0;
+}
+.hint {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+.placement-guide {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.placement-guide ul {
+  margin: 0;
+  padding-left: 20px;
 }

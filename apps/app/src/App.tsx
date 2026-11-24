@@ -11,6 +11,7 @@ import { Home } from './screens/Home';
 import { RoutineEdit } from './screens/RoutineEdit';
 import { History } from './screens/History';
 import { SessionDetail } from './screens/SessionDetail';
+import { Settings } from './screens/Settings';
 import { RepPlayer } from './screens/RepPlayer';
 import type { SetKey } from './form/types';
 import { WorkoutFlow, type WorkoutFlowDeps } from './workout/WorkoutFlow';
@@ -20,6 +21,7 @@ type Screen =
   | { kind: 'home' }
   | { kind: 'edit'; routine?: Routine }
   | { kind: 'history' }
+  | { kind: 'settings' }
   | { kind: 'detail'; sessionId: string }
   | { kind: 'player'; sessionId: string; setKey: SetKey; index: number }
   | { kind: 'workout'; routine: Routine };
@@ -59,6 +61,8 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
   switch (screen.kind) {
     case 'edit':
       return <RoutineEdit key={screen.routine?.id ?? 'new'} storage={storage} routine={screen.routine} nextOrder={nextOrder} onDone={home} />;
+    case 'settings':
+      return <Settings mediaStore={mediaStore} storage={storage} onBack={home} />;
     case 'history':
       return <History storage={storage} onOpen={(sessionId) => setScreen({ kind: 'detail', sessionId })} onBack={home} />;
     case 'detail':
@@ -93,6 +97,7 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
           onStart={(routine) => setScreen({ kind: 'workout', routine })}
           onEdit={(routine) => setScreen({ kind: 'edit', routine })}
           onHistory={() => setScreen({ kind: 'history' })}
+          onSettings={() => setScreen({ kind: 'settings' })}
         />
       );
   }

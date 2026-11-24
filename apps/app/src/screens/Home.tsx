@@ -9,9 +9,11 @@ export type HomeProps = {
   /** 인자 없이 부르면 새 루틴 */
   onEdit: (routine?: Routine) => void;
   onHistory: () => void;
+  /** 없으면 설정 버튼을 숨긴다 */
+  onSettings?: () => void;
 };
 
-export function Home({ storage, onStart, onEdit, onHistory }: HomeProps) {
+export function Home({ storage, onStart, onEdit, onHistory, onSettings }: HomeProps) {
   const [data, setData] = useState<{ routines: Routine[]; sessions: WorkoutSession[] } | null>(null);
   const [error, setError] = useState('');
   const [moving, setMoving] = useState(false);
@@ -130,6 +132,11 @@ export function Home({ storage, onStart, onEdit, onHistory }: HomeProps) {
         <button type="button" onClick={onHistory}>
           기록
         </button>
+        {onSettings && (
+          <button type="button" onClick={onSettings}>
+            설정
+          </button>
+        )}
       </div>
     </main>
   );

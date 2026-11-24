@@ -139,7 +139,7 @@ export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHom
           />
         </div>
       )}
-      {showPlacement && <Placement view={view} routine={routine} />}
+      {showPlacement && <Placement view={view} routine={routine} mediaStore={mediaStore} />}
     </main>
   );
 }
