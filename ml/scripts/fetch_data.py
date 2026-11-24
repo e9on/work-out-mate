@@ -5,6 +5,8 @@
 """
 import hashlib
 import json
+import shutil
+import stat
 import subprocess
 import sys
 import urllib.request
@@ -33,13 +35,36 @@ def _run(cmd: list, cwd=None) -> None:
     subprocess.run(cmd, cwd=cwd, check=True)
 
 
+DONE = ".done"
+
+
 def _already(dest: Path) -> bool:
-    return dest.is_dir() and any(dest.iterdir())
+    """끝까지 받은 폴더만 true(완료 표시 파일 .done이 있을 때)."""
+    return (dest / DONE).is_file()
+
+
+def _rmtree(p: Path) -> None:
+    def onerr(fn, path, _exc):  # 윈도우에서 읽기 전용(.git) 파일 삭제
+        Path(path).chmod(stat.S_IWRITE)
+        fn(path)
+    if p.exists():
+        shutil.rmtree(p, onerror=onerr)
+
+
+def _begin(dest: Path) -> None:
+    """이전에 끊긴 받기 찌꺼기를 지우고 처음부터 받는다."""
+    _rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _finish(dest: Path, note: str) -> None:
+    (dest / DONE).write_text(note, encoding="utf8")
 
 
 def fetch_zenodo(dest: Path = paths.DATA_RAW / "zenodo") -> Path:
     if _already(dest):
         return dest
+    _begin(dest)
     dest.mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(ZENODO_API) as r:
         rec = json.load(r)
@@ -52,23 +77,26 @@ def fetch_zenodo(dest: Path = paths.DATA_RAW / "zenodo") -> Path:
             raise RuntimeError(f"체크섬 불일치: {f['key']} ({got} != {want})")
         with zipfile.ZipFile(zpath) as z:
             z.extractall(dest / zpath.stem)
+    _finish(dest, f"zenodo record 18859797 ({ZENODO_API})")
     return dest
 
 
 def fetch_ec3d(dest: Path = paths.DATA_RAW / "ec3d") -> Path:
     if _already(dest):
         return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    _begin(dest)
     _run([sys.executable, "-m", "gdown", "--folder", EC3D_FOLDER_URL, "-O", str(dest)])
+    _finish(dest, f"ec3d {EC3D_FOLDER_URL}")
     return dest
 
 
 def fetch_motionbert(dest: Path = paths.THIRD_PARTY / "MotionBERT", sha: str = MOTIONBERT_SHA) -> Path:
     if _already(dest):
         return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    _begin(dest)
     _run(["git", "clone", MOTIONBERT_URL, str(dest)])
     _run(["git", "checkout", sha], cwd=dest)
+    _finish(dest, f"{MOTIONBERT_URL} @ {sha}")
     return dest
 
 
@@ -84,4 +112,4 @@ if __name__ == "__main__":
     print(fetch_zenodo())
     print(fetch_ec3d())
     print(fetch_motionbert())
-    check_weights(next(iter(paths.WEIGHTS.glob("*.bin")), paths.WEIGHTS / "motionbert_lite.bin"))
+    check_weights(paths.WEIGHTS / "motionbert_lite.bin")
