@@ -67,7 +67,7 @@ OneDrive가 자동 다운로드를 막는다(403). 브라우저로 직접 받아
   `run_all_status.json`에 `skipped_no_weights`로 남기고 종료 코드 2로 끝난다. 가중치를 넣고 같은 명령을 다시 실행하면 mb_*만 이어서 돈다.
 - 학습은 train, 조기 종료·체크포인트 선택은 val(스쿼트)로만. 런지·플랭크는 val이 없어 고정 epoch.
   test_ec3d·test_own은 학습이 끝난 뒤 한 번만 평가해 파일에만 쓰고 터미널에는 val만 찍는다.
-- VRAM: 프로세스 상한 `vram_fraction` 0.9, full 배치 16 이하·partial 32 이하(설정 검사에서 막음).
+- VRAM: 프로세스 상한 = 시작 때 남은 VRAM - `vram_margin_gib`(0.5GiB), 넘치면 OOM 예외(배치는 줄이지 않음), full 배치 16 이하·partial 32 이하(설정 검사에서 막음).
 - 결과(git 제외): `ml/runs/<stage>/seed<k>/<운동>/metrics.json`, `seed<k>/metrics.json`, `<stage>/summary.json`, `ml/runs/run_all_status.json`
 
 ### 실행 시간과 VRAM 최대치 (RTX 4060 Ti 8GB, 2026-11-25)

@@ -221,6 +221,29 @@ def _is_cuda(cfg: dict) -> bool:
     return torch.cuda.is_available() and str(cfg.get("device", tr.DEFAULT_CFG["device"])).startswith("cuda")
 
 
+def memory_fraction(total: int, free: int, margin_gib: float) -> float:
+    """R17 프로세스 VRAM 상한 비율(set_per_process_memory_fraction은 전체 대비 비율을 받는다).
+
+    상한 = (남은 메모리 free - 여유 margin) / 전체 total. 남은 메모리가 여유보다 적으면 ValueError.
+    """
+    if total <= 0 or free <= 0 or free > total:
+        raise ValueError(f"잘못된 VRAM 값: total={total}, free={free}")
+    cap = free - margin_gib * 2**30
+    if cap <= 0:
+        raise ValueError(f"남은 VRAM {free / 2**30:.2f}GiB가 여유 {margin_gib}GiB보다 적음")
+    return cap / total
+
+
+def set_vram_cap(cfg: dict) -> dict:
+    """시작 때 남은 VRAM 기준으로 상한을 건다. 기록용 dict 반환."""
+    free, total = torch.cuda.mem_get_info()
+    margin = float(cfg.get("vram_margin_gib", 0.5))
+    frac = memory_fraction(total, free, margin)
+    torch.cuda.set_per_process_memory_fraction(frac)
+    return {"fraction": round(frac, 4), "cap_gib": round(frac * total / 2**30, 2), "free_gib": round(free / 2**30, 2),
+            "total_gib": round(total / 2**30, 2), "margin_gib": margin}
+
+
 def resolve_fixed(scfg: dict, runs: Path, seeds) -> dict:
     """고정 epoch 값을 정수로. from_mb_probe = mb_probe 스쿼트 val 최적 epoch의 시드 최대값(val만 근거)."""
     out = {}
@@ -260,6 +283,7 @@ def run_seed(name: str, cfg: dict, seed: int, data: dict, runs: Path, weights: P
     t0 = time.time()
     rec = {"stage": name, "seed": seed, "kind": scfg["kind"], "freeze": scfg.get("freeze"), "lr": scfg["lr"],
            "batch_size": scfg["batch_size"], "fixed_epochs": fixed, "init_from": None, "exercises": {}}
+    rec["vram_cap"] = cfg.get("_vram_cap")
     if scfg.get("freeze") == "full":
         rec["body_lr"] = scfg["lr"] * scfg["body_lr_ratio"]
     model = None
@@ -361,7 +385,9 @@ def main(argv=None) -> int:
     status_path = runs / "run_all_status.json"
     status = _read(status_path) if status_path.exists() else {}
     if _is_cuda(cfg):
-        torch.cuda.set_per_process_memory_fraction(float(cfg.get("vram_fraction", 0.9)))  # R17
+        status["vram_cap"] = cfg["_vram_cap"] = set_vram_cap(cfg)  # R17
+        print(f"VRAM 상한 {status['vram_cap']['cap_gib']}GiB (남은 {status['vram_cap']['free_gib']}GiB - 여유 "
+              f"{status['vram_cap']['margin_gib']}GiB)")
     data, wfile, code, warned = None, None, 0, False
     for name in stages:
         scfg = cfg["stages"][name]
@@ -400,7 +426,7 @@ def main(argv=None) -> int:
             seeds_info[str(k)] = _read(done_p)
         summ = summarize_stage(name, cfg, runs)
         print(f"[{name}] 요약 저장(시드 평균·편차, 평가 지표는 파일에만): {summ}")
-        status[name] = {"status": "done", "seeds": seeds_info,
+        status[name] = {"status": "done", "seeds": seeds_info, "vram_cap_gib": (status.get("vram_cap") or {}).get("cap_gib"),
                         "seconds_total": round(sum(v["seconds"] for v in seeds_info.values()), 1),
                         "vram_peak_allocated_gib": max([v["vram"]["peak_allocated_gib"] for v in seeds_info.values()
                                                         if v.get("vram")] or [None], key=lambda x: x or 0)}

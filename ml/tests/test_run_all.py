@@ -307,3 +307,35 @@ def test_missing_weights_skips_mb_stages(tmp_path, fake, capsys):
     assert sum(1 for c in calls["train"] if c["out"].parts[-3] == "small") == n_small
     status = json.loads((runs / "run_all_status.json").read_text(encoding="utf8"))
     assert all(status[st]["status"] == "done" for st in MB_STAGES)
+
+
+# ---------------------------------------------------------------- R17 VRAM 상한
+GiB = 2**30
+
+
+def test_memory_fraction_uses_free_memory_minus_margin():
+    total, free = 8 * GiB, int(6.91e9)
+    frac = ra.memory_fraction(total, free, 0.5)
+    assert frac * total == pytest.approx(free - 0.5 * GiB)
+    assert frac * total < free  # 전체 기준 0.9(7.2GiB)처럼 남은 메모리를 넘지 않는다
+    assert frac < 0.9
+
+
+@pytest.mark.parametrize("total,free,margin", [(8 * GiB, int(0.4 * GiB), 0.5), (8 * GiB, 0, 0.5),
+                                                (8 * GiB, 9 * GiB, 0.5), (0, 1, 0.5)])
+def test_memory_fraction_rejects_bad_values(total, free, margin):
+    with pytest.raises(ValueError):
+        ra.memory_fraction(total, free, margin)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="GPU 없음")
+def test_cap_raises_oom_instead_of_spilling():
+    # 상한을 넘는 할당은 공유 메모리로 넘치지 않고 OOM 예외가 나야 한다
+    total = torch.cuda.mem_get_info()[1]
+    torch.cuda.set_per_process_memory_fraction(0.05)
+    try:
+        with pytest.raises(torch.OutOfMemoryError):
+            torch.empty(int(total * 0.1), dtype=torch.uint8, device="cuda")
+    finally:
+        torch.cuda.set_per_process_memory_fraction(1.0)
+        torch.cuda.empty_cache()
