@@ -119,7 +119,8 @@ def find_reps_by_knee(angle: np.ndarray) -> list[tuple[int, int]]:
     return reps
 
 
-def _lite_reps(path: Path, expected: int) -> list[Rep]:
+def _lite_load(path: Path, expected: int):
+    """lite 녹화 → (프레임 목록, 화소 좌표 (F,33,2), 가시성 (F,33), 평활 무릎 각도, 반복 구간)."""
     frames = json.loads(path.read_text(encoding="utf8"))["frames"]
     world = np.array([[[p["x"], p["y"], p["z"]] for p in f["world"]] for f in frames], dtype=np.float64)
     img = np.array([[[p["x"], p["y"]] for p in f["image"]] for f in frames], dtype=np.float64)
@@ -128,7 +129,12 @@ def _lite_reps(path: Path, expected: int) -> list[Rep]:
     segs = find_reps_by_knee(knee)
     if len(segs) != expected:
         raise ValueError(f"{path.name}: 찾은 반복 {len(segs)}회, 기대 {expected}회")
-    seq_all = sk.from_mediapipe33(img * np.array(LITE_WH), vis)
+    return frames, img * np.array(LITE_WH), vis, _median5(knee), segs
+
+
+def _lite_reps(path: Path, expected: int) -> list[Rep]:
+    _, px, vis, _, segs = _lite_load(path, expected)
+    seq_all = sk.from_mediapipe33(px, vis)
     out = []
     for n, (s, e) in enumerate(segs, start=1):
         lab, grp = lite_label(path.name, n)
@@ -137,9 +143,21 @@ def _lite_reps(path: Path, expected: int) -> list[Rep]:
     return out
 
 
-def _video_reps(path: Path) -> list[Rep]:
+def _video_windows(path: Path):
+    """영상 녹화 → (프레임 목록, 시각 t, 반복별 프레임 마스크). 20회 모두 3프레임 이상이어야 한다."""
     frames = json.loads(path.read_text(encoding="utf8"))["frames"]
     t = np.array([f["t"] for f in frames], dtype=np.float64)
+    masks = []
+    for n, b in enumerate(VIDEO_BOTTOMS_S, start=1):
+        m = (t >= b * 1000 - VIDEO_HALF_WINDOW_MS) & (t <= b * 1000 + VIDEO_HALF_WINDOW_MS)
+        if m.sum() < 3:
+            raise ValueError(f"{path.name}: {n}번째 반복 구간 프레임 부족")
+        masks.append(m)
+    return frames, t, masks
+
+
+def _video_reps(path: Path) -> list[Rep]:
+    frames, _, masks = _video_windows(path)
     xy = np.zeros((len(frames), 26, 2))
     sc = np.zeros((len(frames), 26))
     for i, f in enumerate(frames):
@@ -148,13 +166,43 @@ def _video_reps(path: Path) -> list[Rep]:
             sc[i] = f["s"]
     seq_all = sk.from_halpe26(xy, sc)
     out = []
-    for n, b in enumerate(VIDEO_BOTTOMS_S, start=1):
-        m = (t >= b * 1000 - VIDEO_HALF_WINDOW_MS) & (t <= b * 1000 + VIDEO_HALF_WINDOW_MS)
-        if m.sum() < 3:
-            raise ValueError(f"{path.name}: {n}번째 반복 구간 프레임 부족")
+    for n, m in enumerate(masks, start=1):
         lab, grp = video_label(n)
         out.append(Rep(source="own", exercise="squat", subject="own", seq=seq_all[m],
                        labels=lab, meta={"file": path.name, "index": n, "group": grp}))
+    return out
+
+
+def raw_sets(private_dir: Path, files: list[str] | None = None) -> list[dict]:
+    """규칙 판정용 정규화 전 원본 프레임. load_own과 같은 파일·같은 반복 경계(같은 함수로 구함).
+
+    녹화 한 개가 한 세트다(core의 서 있을 때 기준값을 세트 전체 프레임으로 구하므로 반복 구간만 넘기면 안 된다).
+    반환: [{file, kind("mediapipe"|"halpe"), frames:[{t, kps:[[x,y,score]…]|None}],
+            reps:[{index, startT, bottomT, endT}]}]. mediapipe는 33점(화소 좌표, score=visibility), halpe는 26점.
+    """
+    private_dir = Path(private_dir)
+    files = default_files() if files is None else list(files)
+    out = []
+    for name in files:
+        if name in LITE_FILES:
+            frames, px, vis, knee, segs = _lite_load(private_dir / name, LITE_FILES[name])
+            t = [float(f["t"]) for f in frames]
+            fr = [{"t": t[i], "kps": [[float(px[i, j, 0]), float(px[i, j, 1]), float(vis[i, j])]
+                                      for j in range(33)]} for i in range(len(frames))]
+            reps = []
+            for n, (s, e) in enumerate(segs, start=1):
+                b = s + int(np.argmin(knee[s:e + 1]))
+                reps.append({"index": n, "startT": t[s], "bottomT": t[b], "endT": t[e]})
+            out.append({"file": name, "kind": "mediapipe", "frames": fr, "reps": reps})
+        elif name == VIDEO_FILE:
+            frames, t, _ = _video_windows(private_dir / name)
+            fr = [{"t": float(f["t"]), "kps": None if f["k"] is None or f["s"] is None else
+                   [[float(p[0]), float(p[1]), float(c)] for p, c in zip(f["k"], f["s"])]} for f in frames]
+            reps = [{"index": n, "startT": b * 1000 - VIDEO_HALF_WINDOW_MS, "bottomT": b * 1000,
+                     "endT": b * 1000 + VIDEO_HALF_WINDOW_MS} for n, b in enumerate(VIDEO_BOTTOMS_S, start=1)]
+            out.append({"file": name, "kind": "halpe", "frames": fr, "reps": reps})
+        else:
+            raise ValueError(f"알 수 없는 본인 녹화 파일: {name}")
     return out
 
 
