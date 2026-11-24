@@ -11,6 +11,8 @@ import { Home } from './screens/Home';
 import { RoutineEdit } from './screens/RoutineEdit';
 import { History } from './screens/History';
 import { SessionDetail } from './screens/SessionDetail';
+import { RepPlayer } from './screens/RepPlayer';
+import type { SetKey } from './form/types';
 import { WorkoutFlow, type WorkoutFlowDeps } from './workout/WorkoutFlow';
 
 // 라우터 라이브러리 없이 상태 하나로 화면을 고른다.
@@ -19,6 +21,7 @@ type Screen =
   | { kind: 'edit'; routine?: Routine }
   | { kind: 'history' }
   | { kind: 'detail'; sessionId: string }
+  | { kind: 'player'; sessionId: string; setKey: SetKey; index: number }
   | { kind: 'workout'; routine: Routine };
 
 export type AppProps = { storage?: Storage; mediaStore?: MediaStore; analysisQueue?: AnalysisQueue; workoutDeps?: WorkoutFlowDeps };
@@ -59,7 +62,28 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
     case 'history':
       return <History storage={storage} onOpen={(sessionId) => setScreen({ kind: 'detail', sessionId })} onBack={home} />;
     case 'detail':
-      return <SessionDetail storage={storage} sessionId={screen.sessionId} mediaStore={mediaStore} analysisQueue={analysisQueue} onBack={() => setScreen({ kind: 'history' })} />;
+      return (
+        <SessionDetail
+          storage={storage}
+          sessionId={screen.sessionId}
+          mediaStore={mediaStore}
+          analysisQueue={analysisQueue}
+          onPlay={(setKey, index) => setScreen({ kind: 'player', sessionId: screen.sessionId, setKey, index })}
+          onBack={() => setScreen({ kind: 'history' })}
+        />
+      );
+    case 'player':
+      return (
+        <RepPlayer
+          key={`${screen.setKey}#${screen.index}`}
+          store={mediaStore}
+          storage={storage}
+          sessionId={screen.sessionId}
+          setKey={screen.setKey}
+          index={screen.index}
+          onBack={() => setScreen({ kind: 'detail', sessionId: screen.sessionId })}
+        />
+      );
     case 'workout':
       return <WorkoutFlow key={screen.routine.id} routine={screen.routine} storage={storage} mediaStore={mediaStore} analysisQueue={analysisQueue} onHome={home} deps={workoutDeps} />;
     default:

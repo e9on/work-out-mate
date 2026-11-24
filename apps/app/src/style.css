@@ -366,3 +366,49 @@ body {
   color: #ff8a80;
   margin: 4px 0;
 }
+
+/* ---- 반복 다시 보기 ---- */
+.player-host {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  background: #111;
+}
+.player-stage {
+  position: relative;
+  width: 100%;
+}
+.player-video,
+.player-overlay {
+  display: block;
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  background: #000;
+}
+.player-overlay {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  background: transparent;
+  pointer-events: none;
+}
+.player-controls,
+.player-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.player-controls button[aria-pressed='true'],
+.player-kinds button[aria-pressed='true'] {
+  background: #78dcff;
+  color: #000;
+}
+.player-note {
+  width: 100%;
+  min-height: 3em;
+}
+.player-status {
+  margin: 24px 0;
+}

@@ -13,6 +13,8 @@ import { createKeepAwake } from '../platform/keepAwake';
 import { Workout } from '../screens/Workout';
 import { Rest } from '../screens/Rest';
 import { Summary } from '../screens/Summary';
+import { RepPlayer } from '../screens/RepPlayer';
+import type { SetKey } from '../form/types';
 import { Placement } from '../screens/Placement';
 import { CameraErrorView } from '../screens/CameraErrorView';
 
@@ -83,6 +85,9 @@ export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHom
   }, [analysisQueue, setBusy]);
   useEffect(() => () => analysisQueue?.setBusy(false), [analysisQueue]);
 
+  // 결과 화면에서 다시 보기를 누르면 그 위에 재생 화면을 겹쳐 띄운다
+  const [player, setPlayer] = useState<{ setKey: SetKey; index: number } | null>(null);
+
   const getVideo = useCallback(() => videoRef.current, []);
 
   const start = useCallback(() => {
@@ -96,7 +101,7 @@ export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHom
 
   let content = null;
   if (view && engine) {
-    if (view.ended) content = <Summary session={view.ended} onHome={onHome} mediaStore={mediaStore} analysisQueue={analysisQueue} />;
+    if (view.ended) content = <Summary session={view.ended} onHome={onHome} mediaStore={mediaStore} analysisQueue={analysisQueue} onPlay={(setKey, index) => setPlayer({ setKey, index })} />;
     else if (view.cameraError) content = <CameraErrorView kind={view.cameraError} onRetry={start} onHome={onHome} />;
     else if (view.phase === 'rest')
       content = <Rest view={view} onSkipRest={() => engine.skipRest()} onPause={() => engine.pause()} onResume={() => engine.resume()} />;
@@ -121,6 +126,19 @@ export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHom
     <main className="workout-flow">
       <video ref={videoRef} className="camera-video mirror" playsInline muted autoPlay aria-hidden="true" />
       {content}
+      {player && view?.ended && mediaStore && (
+        <div className="player-host">
+          <RepPlayer
+            key={`${player.setKey}#${player.index}`}
+            store={mediaStore}
+            storage={storage}
+            sessionId={view.ended.id}
+            setKey={player.setKey}
+            index={player.index}
+            onBack={() => setPlayer(null)}
+          />
+        </div>
+      )}
       {showPlacement && <Placement view={view} routine={routine} />}
     </main>
   );
