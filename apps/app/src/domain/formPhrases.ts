@@ -12,6 +12,12 @@ export const NO_FINDINGS = '자세 지적 없음';
 
 export const analyzingText = (done: number, total: number) => `분석 중… (${done}/${total})`;
 
+/** 영상은 있는데 아직 분석이 없는 세트 */
+export const ANALYZING_SET = '분석 중…';
+
+/** 일부 반복을 판정하지 못했을 때(사람이 안 보이거나 한쪽 다리만 굽힘) */
+export const unjudgedText = (n: number) => `${n}회는 판정하지 못했어요`;
+
 export const REASON_PHRASES: Record<NonNullable<SetAnalysis['reason']>, string> = {
   noVideo: '영상이 없어 분석하지 못했어요',
   noPerson: '사람이 화면에 보이지 않아 분석하지 못했어요',

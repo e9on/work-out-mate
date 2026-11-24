@@ -10,6 +10,8 @@ import { CameraErrorView } from '../src/screens/CameraErrorView';
 import { WorkoutFlow } from '../src/workout/WorkoutFlow';
 import { CameraError } from '../src/ports/pose';
 import { createMemoryStorage } from '../src/storage/memoryStorage';
+import { createMemoryMediaStore } from '../src/storage/memoryMediaStore';
+import { setKey } from '../src/form/types';
 import { FakePose, makeFakeWorkout } from './fakeWorkout';
 
 const ROUTINE: Routine = {
@@ -238,6 +240,20 @@ describe('Summary 화면', () => {
     expect(screen.getByText('총 시간 5분 3초')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '홈으로' }));
     expect(onHome).toHaveBeenCalledTimes(1);
+  });
+
+  it('mediaStore가 있으면 자세 분석 목록을 끼워 그리고 ▶은 onPlay를 부른다', async () => {
+    const store = createMemoryMediaStore();
+    await store.putCaptureMeta({ sessionId: 's1', videoEnabled: true, consentAgreed: false, consentVersion: null });
+    const key = setKey('s1', 0, 0);
+    await store.putAnalysis({
+      key, sessionId: 's1', status: 'done', reason: null, metrics: [],
+      findings: [{ index: 3, kind: 'heel', value: 0.4 }], notes: [], uncertain: [], frames: [], model: 'rtmpose-m-halpe26', analyzedAt: 1,
+    });
+    const onPlay = vi.fn();
+    render(<Summary session={session} onHome={vi.fn()} mediaStore={store} onPlay={onPlay} />);
+    fireEvent.click(await screen.findByRole('button', { name: '3번째 다시 보기' }));
+    expect(onPlay).toHaveBeenCalledWith(key, 3);
   });
 });
 

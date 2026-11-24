@@ -14,7 +14,7 @@ vi.mock('../src/platform/mediaRecorderCapture', () => ({
 
 const { buildDeps } = await import('../src/workout/WorkoutFlow');
 
-const ROUTINE: Routine = { id: 'r', name: '루틴', order: 0, exercises: [{ exercise: 'squat', sets: 1, target: { kind: 'reps', reps: 5 }, restSec: 30 }] };
+const ROUTINE: Routine = { id: 'r', name: '루틴', order: 0, createdAt: 0, updatedAt: 0, exercises: [{ exercise: 'squat', sets: 1, target: { kind: 'reps', reps: 5 }, restSec: 30 }] };
 
 describe('WorkoutFlow 녹화 시계', () => {
   it('녹화 startedAt은 반복·상자 시각과 같은 시계(엔진 now + epochOffset)를 쓴다', () => {

@@ -194,4 +194,63 @@ describe('FormFindings', () => {
     expect(screen.getAllByText('⚠')).toHaveLength(2);
     expect(screen.getAllByText('ⓘ')).toHaveLength(1);
   });
+
+  it('영상도 분석도 없는 스쿼트 세트(녹화 실패)는 "영상 없음" 사유, 영상만 있으면 분석 중', async () => {
+    const store = await setup({ videos: [1] });
+    const zero = { ...log(2, []), count: 0 };
+    const hang: SetLog = { ...log(3, reps), exercise: 'deadHang', exerciseIndex: 1, setIndex: 0 };
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps), log(1, reps), zero, hang])} />);
+    const titles = (await screen.findAllByRole('heading', { level: 3 })).map((h) => h.textContent);
+    expect(titles).toEqual(['스쿼트 1세트  5회', '스쿼트 2세트  5회']);
+    expect(screen.getByText('영상이 없어 분석하지 못했어요')).toBeInTheDocument();
+    expect(screen.getByText('분석 중…')).toBeInTheDocument();
+    expect(screen.getByText('분석 중… (0/1)')).toBeInTheDocument();
+  });
+
+  it('영상이 정리된 뒤에도 videoStartedAt으로 m:ss와 ▶을 보인다', async () => {
+    const onPlay = vi.fn();
+    const store = await setup({ videos: [], analyses: [analysis(0, { videoStartedAt: STARTED, findings: [{ index: 4, kind: 'depth', value: 1 }] })] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} onPlay={onPlay} />);
+    expect(await screen.findByText('4번째 (0:18)  허벅지가 바닥과 평행해질 때까지 앉지 않았어요', { normalizer: (t: string) => t })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '4번째 다시 보기' }));
+    expect(onPlay).toHaveBeenCalledWith(setKey(SID, 0, 0), 4);
+  });
+
+  it('videoStartedAt이 없는 옛 분석은 영상이 정리됐어도 ▶을 보이고 시각만 뺀다', async () => {
+    const store = await setup({ videos: [], analyses: [analysis(0, { findings: [{ index: 4, kind: 'depth', value: 1 }] })] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} onPlay={vi.fn()} />);
+    expect(await screen.findByText('4번째  허벅지가 바닥과 평행해질 때까지 앉지 않았어요', { normalizer: (t: string) => t })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '4번째 다시 보기' })).toBeInTheDocument();
+  });
+
+  it('지적이 없는 세트에도 "영상 보기"가 있고 첫 반복부터 연다', async () => {
+    const two = [
+      { index: 1, startT: STARTED + 1000, bottomT: STARTED + 2000, endT: STARTED + 3000 },
+      { index: 2, startT: STARTED + 4000, bottomT: STARTED + 5000, endT: STARTED + 6000 },
+    ];
+    const onPlay = vi.fn();
+    const store = await setup({ analyses: [analysis(0)] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, two)])} onPlay={onPlay} />);
+    expect(await screen.findByText('자세 지적 없음')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '영상 보기' }));
+    expect(onPlay).toHaveBeenCalledWith(setKey(SID, 0, 0), 1);
+  });
+
+  const m = (index: number, skipped: 'noPerson' | 'oneLeg' | null) => ({
+    index, bottomT: 0, kneeDeg: skipped ? null : 80, kneeAnkleRatio: skipped ? null : 1.3, heelRise: skipped ? null : 0, descentMs: skipped ? null : 900, skipped,
+  });
+
+  it('판정한 반복이 하나도 없으면 "자세 지적 없음" 대신 사람이 안 보였다는 사유', async () => {
+    const store = await setup({ analyses: [analysis(0, { metrics: [m(1, 'noPerson'), m(2, 'oneLeg')] })] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
+    expect(await screen.findByText('사람이 화면에 보이지 않아 분석하지 못했어요')).toBeInTheDocument();
+    expect(screen.queryByText('자세 지적 없음')).toBeNull();
+  });
+
+  it('일부 반복만 판정했으면 "n회는 판정하지 못했어요" 한 줄을 더한다', async () => {
+    const store = await setup({ analyses: [analysis(0, { metrics: [m(1, null), m(2, 'noPerson'), m(3, 'oneLeg')] })] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
+    expect(await screen.findByText('자세 지적 없음')).toBeInTheDocument();
+    expect(screen.getByText('2회는 판정하지 못했어요')).toBeInTheDocument();
+  });
 });

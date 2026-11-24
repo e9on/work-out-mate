@@ -21,6 +21,7 @@ export type AnalysisQueue = {
   resumePending(): Promise<void>;
   /** 세트 진행 중이면 true. true인 동안은 프레임 사이에서 멈춘다 */
   setBusy(busy: boolean): void;
+  /** 세트를 대기열에 넣었거나 분석 결과를 저장했을 때 그 세션 id로 부른다 */
   onProgress(cb: (sessionId: string) => void): () => void;
   dispose(): void;
 };
@@ -131,15 +132,19 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
   };
   if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
 
-  const finish = async (a: SetAnalysis): Promise<void> => {
-    await store.putAnalysis(a);
+  const notify = (sessionId: string): void => {
     for (const cb of [...listeners]) {
       try {
-        cb(a.sessionId);
+        cb(sessionId);
       } catch (e) {
         warn('분석 진행 알림 실패', e);
       }
     }
+  };
+
+  const finish = async (a: SetAnalysis): Promise<void> => {
+    await store.putAnalysis(a);
+    notify(a.sessionId);
   };
 
   const failed = (
@@ -307,6 +312,8 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     if (disposed || known.has(key)) return;
     known.add(key);
     pending.push(key);
+    // 영상이 막 저장됐음을 알려 화면이 "영상 없음" 대신 "분석 중"을 보이게 한다
+    notify(sessionIdOf(key));
     void pump();
   };
 

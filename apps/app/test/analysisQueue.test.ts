@@ -152,8 +152,19 @@ describe('분석 대기열', () => {
     expect(a.metrics).toHaveLength(1);
     expect(a.metrics[0]!.skipped).toBeNull();
     expect(a.findings.some((f) => f.kind === 'depth' && f.index === 1)).toBe(true);
-    await vi.waitFor(() => expect(progress).toHaveBeenCalledWith('s1'));
+    // 대기열에 넣을 때 한 번(분석 중 표시), 저장 뒤 한 번
+    await vi.waitFor(() => expect(progress).toHaveBeenCalledTimes(2));
+    expect(progress).toHaveBeenCalledWith('s1');
     expect(reader.closed).toBe(1);
+  });
+
+  it('enqueue하면 분석이 끝나기 전에 onProgress로 알린다(결과 화면이 "분석 중"으로 바뀌게)', async () => {
+    const { queue } = await setup();
+    const progress = vi.fn();
+    queue.onProgress(progress);
+    queue.setBusy(true);
+    queue.enqueue(setKey('s9', 0, 0));
+    expect(progress).toHaveBeenCalledWith('s9');
   });
 
   it('estimate는 한 번에 하나씩만 부른다', async () => {
