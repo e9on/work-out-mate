@@ -3,6 +3,7 @@ import type { Routine } from '@wom/core';
 import type { Storage } from '../ports/storage';
 import type { MediaStore } from '../ports/mediaStore';
 import { createSetCapture, type SetCapture } from '../form/setCapture';
+import type { AnalysisQueue } from '../form/analysisQueue';
 import { createMediaRecorder } from '../platform/mediaRecorderCapture';
 import type { EngineDeps } from './engine';
 import { useWorkout } from './useWorkout';
@@ -22,6 +23,8 @@ export type WorkoutFlowProps = {
   storage: Storage;
   /** 없으면 세트 영상을 녹화하지 않는다 */
   mediaStore?: MediaStore;
+  /** 세트 영상이 저장되면 분석 대기열에 넣고, 세트 진행 중에는 분석을 멈추게 한다 */
+  analysisQueue?: AnalysisQueue;
   onHome: () => void;
   deps?: WorkoutFlowDeps;
 };
@@ -32,6 +35,7 @@ function buildDeps(
   storage: Storage,
   d: WorkoutFlowDeps = {},
   mediaStore?: MediaStore,
+  analysisQueue?: AnalysisQueue,
   getStream: () => MediaStream | null = () => null,
 ): EngineDeps {
   const epochOffset = d.epochOffset ?? Date.now() - performance.now();
@@ -40,7 +44,7 @@ function buildDeps(
     capture = createSetCapture({
       store: mediaStore,
       recorder: createMediaRecorder(getStream, () => Date.now()),
-      onSaved: () => undefined,
+      onSaved: (key) => analysisQueue?.enqueue(key),
     });
   }
   return {
@@ -63,15 +67,22 @@ function buildDeps(
  * ended → Summary, cameraError → 오류 화면, rest → Rest, 그 밖에는 Workout(+ Placement 겹침).
  * 카메라 <video>는 화면이 바뀌어도 같은 요소를 쓰도록 늘 마운트해 둔다(다른 화면은 그 위를 덮는다).
  */
-export function WorkoutFlow({ routine, storage, mediaStore, onHome, deps }: WorkoutFlowProps) {
+export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHome, deps }: WorkoutFlowProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [d] = useState(() =>
-    buildDeps(routine, storage, deps, mediaStore, () => {
+    buildDeps(routine, storage, deps, mediaStore, analysisQueue, () => {
       const src = videoRef.current?.srcObject;
       return typeof MediaStream !== 'undefined' && src instanceof MediaStream ? src : null;
     }),
   );
   const { view, engine } = useWorkout(d);
+  // 세트 화면(준비·카운트다운·진행)이면 분석을 멈추고, 쉬는 시간·루틴 끝·화면을 떠난 뒤에는 돌린다
+  const setBusy = !!view && !view.ended && view.phase === 'set';
+  useEffect(() => {
+    analysisQueue?.setBusy(setBusy);
+  }, [analysisQueue, setBusy]);
+  useEffect(() => () => analysisQueue?.setBusy(false), [analysisQueue]);
+
   const getVideo = useCallback(() => videoRef.current, []);
 
   const start = useCallback(() => {

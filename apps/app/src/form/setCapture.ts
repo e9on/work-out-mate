@@ -143,7 +143,12 @@ export function createSetCapture(deps: { store: MediaStore; recorder: Recorder |
           blob: rec.blob,
           boxes: a.boxes,
         });
-        onSaved(key);
+        // 저장은 끝났으므로 후속 처리(분석 대기열 등)가 던져도 key를 돌려준다
+        try {
+          onSaved(key);
+        } catch (e) {
+          warn('세트 영상 저장 뒤 처리 실패', e);
+        }
         return key;
       } catch (e) {
         warn('세트 영상 저장 실패', e);

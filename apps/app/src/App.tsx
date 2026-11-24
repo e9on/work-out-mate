@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import type { Routine } from '@wom/core';
 import type { Storage } from './ports/storage';
 import type { MediaStore } from './ports/mediaStore';
+import { createAnalysisQueue, type AnalysisQueue } from './form/analysisQueue';
+import type { FormPoseModel } from './ports/formPose';
+import { createVideoFrameReader } from './platform/videoFrameReader';
 import { createIdbMediaStore } from './storage/idbMediaStore';
 import { createIdbStorage } from './storage/idbStorage';
 import { Home } from './screens/Home';
@@ -18,11 +21,21 @@ type Screen =
   | { kind: 'detail'; sessionId: string }
   | { kind: 'workout'; routine: Routine };
 
-export type AppProps = { storage?: Storage; mediaStore?: MediaStore; workoutDeps?: WorkoutFlowDeps };
+export type AppProps = { storage?: Storage; mediaStore?: MediaStore; analysisQueue?: AnalysisQueue; workoutDeps?: WorkoutFlowDeps };
 
-export function App({ storage: injected, mediaStore: injectedMedia, workoutDeps }: AppProps = {}) {
+/** onnxruntime-web은 크니 첫 화면 번들에 넣지 않고, 분석이 처음 필요할 때 불러온다 */
+const loadFormModel = async (): Promise<FormPoseModel> => (await import('./platform/rtmposeOrt')).createRtmposeModel();
+
+export function App({ storage: injected, mediaStore: injectedMedia, analysisQueue: injectedQueue, workoutDeps }: AppProps = {}) {
   const [storage] = useState<Storage>(() => injected ?? createIdbStorage());
   const [mediaStore] = useState<MediaStore>(() => injectedMedia ?? createIdbMediaStore());
+  const [analysisQueue] = useState<AnalysisQueue>(
+    () => injectedQueue ?? createAnalysisQueue({ store: mediaStore, storage, model: loadFormModel, reader: createVideoFrameReader(), now: () => Date.now() }),
+  );
+  // 앱을 켤 때 분석이 안 끝난 세트 영상을 이어서 분석한다
+  useEffect(() => {
+    analysisQueue.resumePending().catch((e) => console.warn('분석 이어서 하기 실패', e));
+  }, [analysisQueue]);
   const [screen, setScreen] = useState<Screen>({ kind: 'home' });
   const [nextOrder, setNextOrder] = useState(0);
   const home = () => setScreen({ kind: 'home' });
@@ -48,7 +61,7 @@ export function App({ storage: injected, mediaStore: injectedMedia, workoutDeps 
     case 'detail':
       return <SessionDetail storage={storage} sessionId={screen.sessionId} onBack={() => setScreen({ kind: 'history' })} />;
     case 'workout':
-      return <WorkoutFlow key={screen.routine.id} routine={screen.routine} storage={storage} mediaStore={mediaStore} onHome={home} deps={workoutDeps} />;
+      return <WorkoutFlow key={screen.routine.id} routine={screen.routine} storage={storage} mediaStore={mediaStore} analysisQueue={analysisQueue} onHome={home} deps={workoutDeps} />;
     default:
       return (
         <Home

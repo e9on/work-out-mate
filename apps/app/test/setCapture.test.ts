@@ -201,4 +201,22 @@ describe('SetCapture', () => {
     expect(await cap.endSet()).toBeNull();
     expect(onSaved).not.toHaveBeenCalled();
   });
+
+  it('onSaved가 던져도 저장은 됐으므로 endSet은 key를 돌려준다', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const base = createMemoryMediaStore();
+    await base.putSettings(on);
+    const cap = createSetCapture({
+      store: base,
+      recorder: fakeRecorder(),
+      onSaved: () => {
+        throw new Error('대기열 오류');
+      },
+    });
+    await cap.beginSession({ sessionId: 's1', routineId: 'r1' });
+    cap.beginSet(0, 0);
+    expect(await cap.endSet()).toBe(setKey('s1', 0, 0));
+    expect(await base.getVideo(setKey('s1', 0, 0))).not.toBeNull();
+    expect(warn).toHaveBeenCalled();
+  });
 });

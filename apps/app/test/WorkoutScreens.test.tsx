@@ -337,6 +337,21 @@ describe('WorkoutFlow: 화면 선택', () => {
     expect(screen.getByText('스쿼트 2/2세트')).toBeInTheDocument();
   });
 
+  it('세트 화면에서는 분석 대기열을 busy로, 쉬는 시간에는 풀고, 화면을 떠나면 푼다', async () => {
+    const fw = makeFakeWorkout();
+    const queue = { enqueue: vi.fn(), resumePending: vi.fn(), setBusy: vi.fn(), onProgress: vi.fn(), dispose: vi.fn() };
+    const { unmount } = render(<WorkoutFlow routine={squat2} storage={createMemoryStorage()} analysisQueue={queue} onHome={vi.fn()} deps={fw.deps} />);
+    await flush();
+    expect(queue.setBusy).toHaveBeenLastCalledWith(true);
+    act(() => fw.doSquatSet(1));
+    expect(screen.getByText('다음: 스쿼트 2세트 1회')).toBeInTheDocument();
+    expect(queue.setBusy).toHaveBeenLastCalledWith(false);
+    fireEvent.click(screen.getByRole('button', { name: '건너뛰기' }));
+    expect(queue.setBusy).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(queue.setBusy).toHaveBeenLastCalledWith(false);
+  });
+
   it('목표 전에 "세트 끝"을 누르면 Rest 화면으로 간다', async () => {
     const fw = makeFakeWorkout();
     const r5: Routine = { ...squat2, exercises: [{ ...squat2.exercises[0]!, target: { kind: 'reps', reps: 5 } }] };
