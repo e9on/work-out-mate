@@ -6,7 +6,7 @@
 
 **Architecture:** `ml/` 아래 Python 패키지 `wom_ml`. 데이터 받기 → 관절 형식을 H36M 17점 2D로 통일 → 반복 단위 샘플(고정 길이, 오류별 이진 라벨, 분할) → 모델(작은 GRU / MotionBERT 몸통 + 운동별 머리) → 학습·평가 → 집계 보고서. 규칙 판정 비교는 `@wom/core` TS 코드를 esbuild로 묶어 node로 돌린다.
 
-**Tech Stack:** Python 3.11 전용 venv(`ml/.venv`), PyTorch CUDA 12.x판, numpy, scikit-learn, pytest, gdown(EC3D Google Drive), MotionBERT(Walter0807/MotionBERT, Apache-2.0 코드), node 22 + esbuild 0.28.2(이미 저장소에 있음).
+**Tech Stack:** 전역 Python 3.11(`python` 명령, Python311), PyTorch CUDA 12.x판(전역 CPU판을 같은 버전의 CUDA판으로 교체), numpy, scikit-learn, pytest, gdown(EC3D Google Drive), MotionBERT(Walter0807/MotionBERT, Apache-2.0 코드), node 22 + esbuild 0.28.2(이미 저장소에 있음).
 
 **Spec:** `docs/specs/2026-11-25-finetune-experiment-design.md` (2026-11-25 승인)
 
@@ -16,8 +16,8 @@
 - **실험용**: 결과 모델을 앱에 넣지 않는다. ONNX 변환·폰 측정 없음.
 - **평가 오염 금지**: EC3D 피험자 4와 사용자 본인 녹화는 학습·검증·하이퍼파라미터 선택에 절대 쓰지 않는다. Zenodo 검증 분할은 사람 단위.
 - **개인 데이터**: 사용자 본인 녹화는 `packages/core/test/fixtures/private/angle-test/`(git 제외)에서 읽기만 한다. 파생물은 git 제외 폴더(`ml/data/`, `ml/runs/`)에만. 보고서에는 집계 지표만, 원본 좌표·수치 금지. PC 밖으로 보내지 않는다.
-- git 제외: `ml/.venv/`, `ml/data/`, `ml/runs/`, `ml/third_party/`, `ml/weights/`. 코드·설정·테스트·README만 커밋.
-- 기존 Python/conda 환경은 건드리지 않는다(모두 CPU판 PyTorch). 전용 venv에 CUDA판 설치. 다운로드는 사용자 허락 범위(PyTorch·패키지, MotionBERT 코드·경량 가중치, EC3D, Zenodo)만.
+- git 제외: `ml/data/`, `ml/runs/`, `ml/third_party/`, `ml/weights/`. 코드·설정·테스트·README만 커밋.
+- **전역 Python 3.11에 설치한다**(2026-11-25 사용자 결정: "기존 환경에 추가해도 돼, 전역으로 쓸 수 있도록"). 지금 전역에 있는 `torch 2.11.0+cpu`, `torchvision 0.26.0`을 **같은 버전의 CUDA 12.x판**으로 바꾼다(다른 프로젝트가 같은 API를 그대로 쓰게). conda 환경(torch-env, langchain_env)은 건드리지 않는다. 다운로드는 사용자 허락 범위(PyTorch·패키지, MotionBERT 코드·경량 가중치, EC3D, Zenodo)만.
 - 공통 입력: H36M 17점 2D + 신뢰도, 반복당 고정 길이 `T = 64`, 사람 크기로 정규화(거리 절댓값 안 씀).
 - 라벨(오류별 이진): 스쿼트 `kneeIn, shallow, feetWide, trunkLean` / 런지 `shallow, kneeOverToe` / 플랭크 `archedBack, hunchBack`. 주 지표는 스쿼트 `kneeIn`, `shallow`.
 - 본인 녹화 정답(설계 3절): 무릎 모으기→kneeIn, 얕게 앉기→shallow, 바른 자세·무릎 앞으로·빨리 내려가기→모두 0, 뒤꿈치 들기→4칸 모두 0(공개 데이터에 뒤꿈치 라벨이 없어 '뒤꿈치' 칸은 만들지 않고, 그 반복은 나머지 4칸만 평가).
@@ -60,14 +60,14 @@
 
 **Files:**
 - Create: `ml/requirements.txt`, `ml/setup_env.ps1`, `ml/README.md`(환경 절만), `ml/pytest.ini`, `ml/wom_ml/__init__.py`, `ml/wom_ml/paths.py`, `ml/tests/test_env.py`
-- Modify: `.gitignore`(ml 제외 폴더 5개)
+- Modify: `.gitignore`(ml 제외 폴더 4개)
 
 **Interfaces:**
 - Produces: `paths.ML_ROOT, DATA_RAW (ml/data/raw), DATA_PROC (ml/data/processed), RUNS (ml/runs), THIRD_PARTY (ml/third_party), WEIGHTS (ml/weights), PRIVATE_OWN (packages/core/test/fixtures/private/angle-test)` (모두 `pathlib.Path`, 저장소 루트 기준 절대 경로)
 
-- [ ] **Step 1: 테스트** — `test_paths_are_inside_repo`(모든 경로가 저장소 루트 아래), `test_gitignore_excludes_ml_artifacts`(`.gitignore`에 5개 폴더), `test_torch_cuda`(torch import, `torch.cuda.is_available()`가 False면 `pytest.skip`이 아니라 실패 메시지 "CUDA판 PyTorch가 아님"으로 FAIL — 이 실험은 GPU가 전제)
-- [ ] **Step 2: 실패 확인** — `ml/.venv/Scripts/python -m pytest ml/tests/test_env.py`(venv 없으면 먼저 Step 3)
-- [ ] **Step 3: 환경** — `setup_env.ps1`: `py -3.11 -m venv ml/.venv` → pip로 `torch`를 CUDA 12.x 인덱스(`--index-url https://download.pytorch.org/whl/cu126`)에서, 나머지(`numpy scikit-learn pytest gdown tqdm pyyaml einops timm`)는 PyPI에서. requirements.txt에 버전 고정(설치된 버전으로). 기존 환경은 건드리지 않음.
+- [ ] **Step 1: 테스트** — `test_paths_are_inside_repo`(모든 경로가 저장소 루트 아래), `test_gitignore_excludes_ml_artifacts`(`.gitignore`에 4개 폴더), `test_torch_cuda`(torch import, `torch.cuda.is_available()`가 False면 `pytest.skip`이 아니라 실패 메시지 "CUDA판 PyTorch가 아님"으로 FAIL — 이 실험은 GPU가 전제)
+- [ ] **Step 2: 실패 확인** — `python -m pytest ml/tests/test_env.py`(전역 Python 3.11. pytest가 없으면 먼저 Step 3)
+- [ ] **Step 3: 환경** — `setup_env.ps1`(전역 Python 3.11 대상): `python -m pip install --upgrade --force-reinstall torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu126`(이 버전의 cu126 빌드가 없으면 그 인덱스에서 가능한 가장 가까운 버전 쌍을 고르고 README에 적기). 나머지(`numpy scikit-learn pytest gdown tqdm pyyaml einops timm`)는 PyPI에서 없는 것만 설치. 설치 전후 `pip list`의 torch 관련 줄을 README에 기록. requirements.txt에는 실제 설치된 버전을 적는다. conda 환경은 건드리지 않음.
 - [ ] **Step 4: 통과 확인** — 3개 PASS, `torch.cuda.get_device_name(0)`에 "4060" 포함을 README에 적기
 - [ ] **Step 5: 커밋** — `chore(ml): 파인튜닝 실험 전용 환경과 폴더 구조`
 
