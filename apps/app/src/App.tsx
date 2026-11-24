@@ -12,6 +12,9 @@ import { RoutineEdit } from './screens/RoutineEdit';
 import { History } from './screens/History';
 import { SessionDetail } from './screens/SessionDetail';
 import { Settings } from './screens/Settings';
+import { runExport } from './form/exportData';
+import { createExportFile } from './platform/exportFile';
+import { APP_VERSION } from './appVersion';
 import { RepPlayer } from './screens/RepPlayer';
 import type { SetKey } from './form/types';
 import { WorkoutFlow, type WorkoutFlowDeps } from './workout/WorkoutFlow';
@@ -62,7 +65,14 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
     case 'edit':
       return <RoutineEdit key={screen.routine?.id ?? 'new'} storage={storage} routine={screen.routine} nextOrder={nextOrder} onDone={home} />;
     case 'settings':
-      return <Settings mediaStore={mediaStore} storage={storage} onBack={home} />;
+      return (
+        <Settings
+          mediaStore={mediaStore}
+          storage={storage}
+          onBack={home}
+          onExport={() => runExport({ storage, store: mediaStore, appVersion: APP_VERSION, file: createExportFile() })}
+        />
+      );
     case 'history':
       return <History storage={storage} onOpen={(sessionId) => setScreen({ kind: 'detail', sessionId })} onBack={home} />;
     case 'detail':

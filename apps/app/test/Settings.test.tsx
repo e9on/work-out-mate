@@ -93,6 +93,14 @@ describe('Settings', () => {
     fireEvent.click(screen.getByRole('button', { name: '학습 데이터 내보내기' }));
     expect(onExport).toHaveBeenCalled();
   });
+
+  it('내보내기 결과 문구를 화면에 보인다', async () => {
+    const store = createMemoryMediaStore();
+    const onExport = vi.fn().mockResolvedValue('내보낼 기록이 없어요');
+    render(<Settings mediaStore={store} onBack={vi.fn()} onExport={onExport} />);
+    fireEvent.click(await screen.findByRole('button', { name: '학습 데이터 내보내기' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('내보낼 기록이 없어요');
+  });
 });
 
 describe('Home 설정 진입', () => {

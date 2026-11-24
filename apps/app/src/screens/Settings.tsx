@@ -10,8 +10,8 @@ export type SettingsProps = {
   /** 있으면 영상이 이미 정리된 세트의 클립까지 찾아 지운다 */
   storage?: Storage;
   onBack: () => void;
-  /** 없으면 내보내기 버튼을 숨긴다(Task 11이 연결) */
-  onExport?: () => void;
+  /** 없으면 내보내기 버튼을 숨긴다. 돌려준 문구(저장 위치·실패 사유)를 화면에 보여 준다 */
+  onExport?: () => Promise<string | void> | void;
 };
 
 export const formatMegabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)}MB`;
@@ -22,6 +22,7 @@ export function Settings({ mediaStore, storage, onBack, onExport }: SettingsProp
   const [error, setError] = useState('');
   const [dialog, setDialog] = useState<'consent' | 'deleteAll' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
   const alive = useRef(true);
 
   const refreshUsage = useCallback(async () => {
@@ -102,6 +103,19 @@ export function Settings({ mediaStore, storage, onBack, onExport }: SettingsProp
     if (alive.current) setBusy(false);
   };
 
+  const runExport = async () => {
+    if (!onExport) return;
+    setBusy(true);
+    setExportMsg('');
+    try {
+      const msg = await onExport();
+      if (alive.current) setExportMsg(msg ?? '');
+    } catch {
+      if (alive.current) setExportMsg('내보내지 못했어요. 다시 시도해 주세요.');
+    }
+    if (alive.current) setBusy(false);
+  };
+
   const agreed = settings?.consent?.agreed ?? false;
 
   return (
@@ -141,9 +155,14 @@ export function Settings({ mediaStore, storage, onBack, onExport }: SettingsProp
               영상 전체 삭제
             </button>
             {onExport && (
-              <button type="button" onClick={onExport}>
+              <button type="button" disabled={busy} onClick={() => void runExport()}>
                 학습 데이터 내보내기
               </button>
+            )}
+            {exportMsg && (
+              <p role="status" className="hint">
+                {exportMsg}
+              </p>
             )}
           </section>
         </>
