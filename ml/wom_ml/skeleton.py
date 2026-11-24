@@ -26,8 +26,10 @@ FLIP_PAIRS: list[tuple[int, int]] = [(1, 4), (2, 5), (3, 6), (11, 14), (12, 15),
 _MP = dict(nose=0, l_eye=2, r_eye=5, l_shoulder=11, r_shoulder=12, l_elbow=13, r_elbow=14,
            l_wrist=15, r_wrist=16, l_hip=23, r_hip=24, l_knee=25, r_knee=26, l_ankle=27, r_ankle=28)
 
-# Halpe26 인덱스: 0 코, 5/6 어깨(왼/오), 7/8 팔꿈치, 9/10 손목, 11/12 엉덩이, 13/14 무릎, 15/16 발목, 17 머리
-_HALPE = dict(nose=0, head=17, l_shoulder=5, r_shoulder=6, l_elbow=7, r_elbow=8,
+# Halpe26 인덱스: 0 코, 1/2 눈(왼/오), 5/6 어깨(왼/오), 7/8 팔꿈치, 9/10 손목, 11/12 엉덩이,
+# 13/14 무릎, 15/16 발목, 17 머리 꼭대기. head는 다른 소스(MediaPipe·EC3D)와 같게 두 눈의 중점을 쓴다
+# (17번 머리 꼭대기를 쓰면 소스마다 head 위치가 달라진다).
+_HALPE = dict(nose=0, l_eye=1, r_eye=2, l_shoulder=5, r_shoulder=6, l_elbow=7, r_elbow=8,
               l_wrist=9, r_wrist=10, l_hip=11, r_hip=12, l_knee=13, r_knee=14,
               l_ankle=15, r_ankle=16)
 
@@ -84,12 +86,12 @@ def from_mediapipe33(xy: np.ndarray, vis: np.ndarray) -> np.ndarray:
 
 
 def from_halpe26(xy: np.ndarray, score: np.ndarray) -> np.ndarray:
-    """(F,26,2),(F,26) -> (F,17,3). pelvis는 두 엉덩이 중점, neck은 두 어깨 중점, head는 Halpe 17번."""
+    """(F,26,2),(F,26) -> (F,17,3). pelvis는 두 엉덩이 중점, neck은 두 어깨 중점, head는 두 눈(1·2)의 중점."""
     xy, score = _clean(xy, score)
     g = lambda k: (xy[:, _HALPE[k]], score[:, _HALPE[k]])
     j = {n: g(n) for n in ["r_hip", "r_knee", "r_ankle", "l_hip", "l_knee", "l_ankle", "nose",
                            "l_shoulder", "l_elbow", "l_wrist", "r_shoulder", "r_elbow", "r_wrist"]}
-    return _assemble(j, g("head"))
+    return _assemble(j, _mid(g("l_eye"), g("r_eye")))
 
 
 def from_ec3d25_3d(xyz: np.ndarray) -> np.ndarray:

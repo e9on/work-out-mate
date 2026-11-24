@@ -138,3 +138,16 @@ def test_ec3d_nan_gives_conf_zero():
     out = sk.from_ec3d25_3d(xyz)
     assert np.isfinite(out).all()
     assert out[0, I["l_knee"], 3] == 0
+
+
+def test_from_halpe26_head_is_eye_midpoint():
+    """다른 소스(MediaPipe·EC3D)와 같게 head는 두 눈(Halpe 1·2)의 중점이어야 한다(17번 머리 꼭대기 아님)."""
+    xy = halpe_frame()
+    xy[1] = (6, -174)   # 왼눈
+    xy[2] = (-4, -172)  # 오른눈
+    out = sk.from_halpe26(xy[None], np.ones((1, 26)))
+    assert np.allclose(out[0, I["head"], :2], [1, -173])
+    score = np.ones((1, 26))
+    score[0, 2] = 0  # 눈 하나가 없으면 head도 없음
+    out = sk.from_halpe26(xy[None], score)
+    assert out[0, I["head"], 2] == 0
