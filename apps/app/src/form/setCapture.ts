@@ -22,10 +22,12 @@ export interface SetCapture {
 /** 상자에 쓸 관절점의 최소 visibility와 최소 개수 */
 const MIN_VISIBILITY = 0.5;
 const MIN_POINTS = 4;
-/** 상자 둘레 여유(상자 크기의 비율) */
-const PAD = 0.1;
 
-/** 정규화 관절점에서 사람 상자를 만든다. 보이는 점이 모자라면 null */
+/**
+ * 정규화 관절점에서 사람 상자를 만든다. 보이는 점이 모자라면 null.
+ * 설계 4.2 [확정]: 관절점 최소/최대 상자를 그대로 쓴다(여유는 RTMPose 전처리의 1.25배뿐).
+ * 상자를 더 넓히면 빠른 반복이 무릎 모임으로 잘못 나왔다.
+ */
 export function boxFromFrame(f: PoseFrame): Box | null {
   let x1 = Infinity;
   let y1 = Infinity;
@@ -41,10 +43,8 @@ export function boxFromFrame(f: PoseFrame): Box | null {
     if (p.y > y2) y2 = p.y;
   }
   if (n < MIN_POINTS) return null;
-  const px = (x2 - x1) * PAD;
-  const py = (y2 - y1) * PAD;
   const c = (v: number) => Math.min(1, Math.max(0, v));
-  return [c(x1 - px), c(y1 - py), c(x2 + px), c(y2 + py)];
+  return [c(x1), c(y1), c(x2), c(y2)];
 }
 
 type Active = { exerciseIndex: number; setIndex: number; started: boolean; boxes: { t: number; box: Box }[] };

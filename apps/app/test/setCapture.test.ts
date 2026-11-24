@@ -1,7 +1,7 @@
 import { Blob as NodeBlob } from 'node:buffer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildPose } from '../../../packages/core/test/helpers/poseBuilder';
-import { createSetCapture, type Recorder } from '../src/form/setCapture';
+import { boxFromFrame, createSetCapture, type Recorder } from '../src/form/setCapture';
 import { setKey, type AppSettings } from '../src/form/types';
 import type { MediaStore } from '../src/ports/mediaStore';
 import { createMemoryMediaStore } from '../src/storage/memoryMediaStore';
@@ -218,5 +218,21 @@ describe('SetCapture', () => {
     expect(await cap.endSet()).toBe(setKey('s1', 0, 0));
     expect(await base.getVideo(setKey('s1', 0, 0))).not.toBeNull();
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('boxFromFrame', () => {
+  const lm = (x: number, y: number, visibility = 1) => ({ x, y, z: 0, visibility });
+  it('보이는 관절점의 최소/최대 상자를 그대로 쓴다(설계 4.2: 더 넓히지 않음)', () => {
+    const f = { t: 0, world: [], image: [lm(0.3, 0.2), lm(0.6, 0.9), lm(0.4, 0.5), lm(0.5, 0.4), lm(0.05, 0.01, 0.1)] };
+    const box = boxFromFrame(f)!;
+    expect(box[0]).toBeCloseTo(0.3);
+    expect(box[1]).toBeCloseTo(0.2);
+    expect(box[2]).toBeCloseTo(0.6);
+    expect(box[3]).toBeCloseTo(0.9);
+  });
+  it('0~1 밖의 점은 잘라 낸다', () => {
+    const f = { t: 0, world: [], image: [lm(-0.1, 0.2), lm(0.6, 1.2), lm(0.4, 0.5), lm(0.5, 0.4)] };
+    expect(boxFromFrame(f)).toEqual([0, 0.2, 0.6, 1]);
   });
 });
