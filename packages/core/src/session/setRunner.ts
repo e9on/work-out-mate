@@ -430,6 +430,7 @@ export class SetRunner {
       startT: this.startT,
       endT: t,
       endReason: reason,
+      reps: this.reps.map((r, i) => ({ index: i + 1, startT: r.startT, bottomT: r.turnT, endT: r.endT })),
     };
     this.ph = 'finished';
     out.push({ type: 'finished', reason, result: copyResult(this.res) });
@@ -471,5 +472,10 @@ export class SetRunner {
 }
 
 function copyResult(r: SetResult): SetResult {
-  return { ...r, target: { ...r.target }, negativeDescentMs: [...r.negativeDescentMs] };
+  return {
+    ...r,
+    target: { ...r.target },
+    negativeDescentMs: [...r.negativeDescentMs],
+    ...(r.reps ? { reps: r.reps.map((x) => ({ ...x })) } : {}),
+  };
 }

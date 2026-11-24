@@ -106,6 +106,32 @@ describe('SetRunner: 스쿼트(보정 → 카운트다운 → 운동)', () => {
     expect(r.result).toEqual(fin.result);
   });
 
+  it('반복 3회 세트 결과의 reps는 길이 3, index 1·2·3, startT < bottomT < endT', () => {
+    const r = squat({ kind: 'reps', reps: 3 });
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 4200), ...reps(175, 90, 3), ...hold(175, 1000)], 'knee'));
+    const res = finishedOf(out)!.result;
+    expect(res.reps).toHaveLength(3);
+    expect(res.reps!.map((x) => x.index)).toEqual([1, 2, 3]);
+    for (const x of res.reps!) {
+      expect(x.startT).toBeLessThan(x.bottomT);
+      expect(x.bottomT).toBeLessThan(x.endT);
+    }
+    expect(res.reps![0]!.endT).toBeLessThanOrEqual(res.reps![1]!.startT);
+  });
+
+  it('세트 끝(button)으로 마지막 반복이 되돌려지면 reps 길이 === count', () => {
+    const r = squat({ kind: 'reps', reps: 10 });
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 4200), ...reps(175, 90, 3)], 'knee'));
+    const evs = r.stop(c.t, 'button');
+    for (const ev of evs) out.push({ t: c.t, ev });
+    const res = finishedOf(out)!.result;
+    expect(res.endReason).toBe('button');
+    expect(res.reps).toHaveLength(res.count);
+    expect(res.count).toBeLessThan(3);
+  });
+
   it('목표 10에서 8회 뒤 멈추면 마지막 반복 + 5000ms에 finished(idle), count 8', () => {
     const r = squat();
     const c = new Clock();

@@ -32,6 +32,7 @@ export type {
   Target,
   EndReason,
   SetResult,
+  RepTiming,
   RoutineExercise,
   Routine,
   SetLog,
