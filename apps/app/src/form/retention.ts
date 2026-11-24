@@ -16,6 +16,8 @@ export interface ClipCutter {
 export type ClipPlan = { setKey: SetKey; index: number; fromMs: number; toMs: number };
 export type RetentionPlan = { keepFull: SetKey[]; toClip: ClipPlan[]; deleteFull: SetKey[] };
 
+const isSettled = (a: SetAnalysis): boolean => a.status === 'done' || a.reason === 'noPerson' || a.reason === 'noVideo';
+
 const hasLabel = (l: RepLabel): boolean => l.verdicts.length > 0 || l.manual.length > 0 || l.normal;
 
 /**
@@ -77,7 +79,7 @@ export function planRetention(
 
 /**
  * 보관 규칙을 실제로 적용한다. 세션 최종 저장 뒤 한 번 부른다.
- * - 아직 분석이 없는 오래된 세트는 건너뛴다(분석 전에 영상을 지우면 안 된다).
+ * - 아직 분석이 없거나 일시 오류(reason 'error')로 실패한 오래된 세트는 건너뛴다(다시 분석할 영상을 지우면 안 된다).
  * - 클립이 이미 있으면 다시 자르지 않는다. 하나라도 못 만들면 그 세트의 전체 영상은 지우지 않고 다음에 다시 시도한다.
  * - 세트 하나가 실패해도 나머지는 계속한다.
  */
@@ -91,7 +93,8 @@ export async function applyRetention(deps: { storage: Storage; store: MediaStore
   const oldSessions = sessions.filter((s) => s.sets.some((set) => oldKeys.has(setKey(s.id, set.exerciseIndex, set.setIndex))));
   const analyses = (await Promise.all(oldSessions.map((s) => store.listAnalyses(s.id)))).flat();
   const labels = (await Promise.all(oldSessions.map((s) => store.listLabels(s.id)))).flat();
-  const analyzed = new Set(analyses.map((a) => a.key));
+  // 끝난 분석(done)이나 다시 해도 결과가 같은 실패(noPerson·noVideo)만 '분석됨'으로 본다
+  const analyzed = new Set(analyses.filter(isSettled).map((a) => a.key));
 
   // 영상 안 시각으로 바꾸려면 각 영상의 startedAt이 필요하다(blob은 쥐고 있지 않는다)
   const startedAt = new Map<SetKey, number>();

@@ -483,4 +483,66 @@ describe('분석 대기열', () => {
     expect(await store.getAnalysis(setKey('s1', 0, 1))).toBeNull();
     expect(model.disposed).toBe(1);
   });
+
+  it('failed·error는 resumePending에서 다시 분석하고, 3번 실패하면 더 넣지 않는다', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const model = fakeModel({
+      kps: () => {
+        throw new Error('일시 오류');
+      },
+    });
+    const reader = fakeReader();
+    const { store, storage, queue } = await setup({ model, reader });
+    await storage.saveSession(session('s1', [log(0, 0)]));
+    await store.putVideo(video('s1', 0, 0));
+    const key = setKey('s1', 0, 0);
+    queue.enqueue(key);
+    expect(await analysisOf(store, key)).toMatchObject({ status: 'failed', reason: 'error', attempts: 1 });
+    for (const n of [2, 3]) {
+      await queue.resumePending();
+      await vi.waitFor(async () => expect((await store.getAnalysis(key))!.attempts).toBe(n));
+    }
+    await queue.resumePending();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reader.opened).toBe(3);
+  });
+
+  it('attempts가 없는 옛 failed·error도 다시 분석하고, 성공하면 done으로 바뀐다', async () => {
+    const { store, storage, queue } = await setup();
+    await storage.saveSession(session('s1', [log(0, 0)]));
+    await store.putVideo(video('s1', 0, 0));
+    const key = setKey('s1', 0, 0);
+    await store.putAnalysis({ key, sessionId: 's1', status: 'failed', reason: 'error', metrics: [], findings: [], notes: [], uncertain: [], frames: [], model: 'rtmpose-m-halpe26', analyzedAt: 1 });
+    await queue.resumePending();
+    await vi.waitFor(async () => expect((await store.getAnalysis(key))!.status).toBe('done'));
+  });
+
+  it('화면이 숨겨진(hidden) 동안은 분석을 멈추고, 다시 보이면 이어서 한다', async () => {
+    let state: DocumentVisibilityState = 'hidden';
+    const desc = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+    try {
+      const { store, storage, model, queue } = await setup();
+      await storage.saveSession(session('s1', [log(0, 0)]));
+      await store.putVideo(video('s1', 0, 0));
+      const key = setKey('s1', 0, 0);
+      queue.enqueue(key);
+      await new Promise((r) => setTimeout(r, 30));
+      expect(model.calls).toHaveLength(0);
+      state = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect((await analysisOf(store, key)).status).toBe('done');
+    } finally {
+      delete (document as unknown as Record<string, unknown>).visibilityState;
+      if (desc) Object.defineProperty(Document.prototype, 'visibilityState', desc);
+    }
+  });
+
+  it('분석에 영상 시작 시각(videoStartedAt)을 함께 저장한다', async () => {
+    const { store, storage, queue } = await setup();
+    await storage.saveSession(session('s1', [log(0, 0)]));
+    await store.putVideo(video('s1', 0, 0));
+    queue.enqueue(setKey('s1', 0, 0));
+    expect((await analysisOf(store, setKey('s1', 0, 0))).videoStartedAt).toBe(STARTED);
+  });
 });

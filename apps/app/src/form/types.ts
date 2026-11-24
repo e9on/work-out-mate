@@ -39,6 +39,10 @@ export type SetAnalysis = {
   frames: KpFrame[];
   model: 'rtmpose-m-halpe26';
   analyzedAt: number;
+  /** 분석한 영상의 첫 프레임 epoch ms. 영상이 정리된 뒤에도 m:ss를 보이려고 남긴다(옛 분석에는 없음) */
+  videoStartedAt?: number;
+  /** reason이 'error'일 때 지금까지 시도한 횟수(옛 분석에는 없음 = 1회) */
+  attempts?: number;
 };
 
 export type ManualErrorKind = 'depth' | 'kneeIn' | 'heel' | 'trunkLean' | 'lumbarFlexion' | 'bounce' | 'other';

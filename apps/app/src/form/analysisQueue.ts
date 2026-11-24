@@ -17,7 +17,7 @@ export interface VideoFrameReader {
 
 export type AnalysisQueue = {
   enqueue(key: SetKey): void;
-  /** 영상은 있는데 분석이 없는 key를 대기열에 넣는다(분석이 끝나길 기다리지 않는다) */
+  /** 영상은 있는데 분석이 없거나 일시 오류로 실패한(시도 3회 미만) key를 대기열에 넣는다(분석이 끝나길 기다리지 않는다) */
   resumePending(): Promise<void>;
   /** 세트 진행 중이면 true. true인 동안은 프레임 사이에서 멈춘다 */
   setBusy(busy: boolean): void;
@@ -43,6 +43,15 @@ const BOX_TOLERANCE_MS = 200;
 const MAX_LOOKUP_TRIES = 5;
 /** 기준 기록으로 참고할 이전 세션 수 */
 const RECENT_SESSIONS = 5;
+/** 일시적 오류(reason 'error')로 실패한 세트를 다시 분석하는 최대 시도 횟수 */
+export const MAX_ERROR_ATTEMPTS = 3;
+
+/** 다시 분석해야 하는 분석인가: 없거나, 오류로 실패했고 시도 횟수가 남았다 */
+export const needsAnalysis = (a: SetAnalysis | null): boolean =>
+  !a || (a.status === 'failed' && a.reason === 'error' && (a.attempts ?? 1) < MAX_ERROR_ATTEMPTS);
+
+/** 브라우저 화면이 숨겨졌나(백그라운드). document가 없으면 false */
+const pageHidden = (): boolean => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 
 const warn = (what: string, e: unknown) => console.warn(what, e);
 
@@ -113,9 +122,14 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     waiters = [];
     for (const f of w) f();
   };
+  /** 세트 진행 중이거나 앱이 백그라운드면 기다린다(숨겨진 동안 영상 읽기가 멈춰 오류가 나는 것을 막는다) */
   const waitNotBusy = async (): Promise<void> => {
-    while (busy && !disposed) await new Promise<void>((r) => waiters.push(r));
+    while ((busy || pageHidden()) && !disposed) await new Promise<void>((r) => waiters.push(r));
   };
+  const onVisibility = () => {
+    if (!pageHidden()) wake();
+  };
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisibility);
 
   const finish = async (a: SetAnalysis): Promise<void> => {
     await store.putAnalysis(a);
@@ -128,7 +142,12 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     }
   };
 
-  const failed = (key: SetKey, sessionId: string, reason: 'noVideo' | 'noPerson' | 'error'): SetAnalysis => ({
+  const failed = (
+    key: SetKey,
+    sessionId: string,
+    reason: 'noVideo' | 'noPerson' | 'error',
+    extra: Pick<SetAnalysis, 'videoStartedAt' | 'attempts'> = {},
+  ): SetAnalysis => ({
     key,
     sessionId,
     status: 'failed',
@@ -140,6 +159,7 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     frames: [],
     model: 'rtmpose-m-halpe26',
     analyzedAt: now(),
+    ...extra,
   });
 
   /** 같은 세션의 앞선 분석 + 최근 세션의 스쿼트 분석 metrics */
@@ -218,7 +238,7 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
       const frames = await readFrames(video, model);
       if (disposed) return 'done';
       if (frames.every((f) => f.kps === null)) {
-        a = failed(key, video.sessionId, 'noPerson');
+        a = failed(key, video.sessionId, 'noPerson', { videoStartedAt: video.startedAt });
       } else {
         const metrics = computeSquatRepMetrics(frames, log.reps);
         const judged = judgeSquat(metrics, await gatherHistory(key, session, log));
@@ -234,11 +254,20 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
           frames,
           model: 'rtmpose-m-halpe26',
           analyzedAt: now(),
+          videoStartedAt: video.startedAt,
         };
       }
     } catch (e) {
       warn('세트 분석 실패', e);
-      a = failed(key, video.sessionId, 'error');
+      // 일시적 오류일 수 있어 시도 횟수를 세어 두고, 다음 resumePending에서 다시 넣는다
+      let prev: SetAnalysis | null = null;
+      try {
+        prev = await store.getAnalysis(key);
+      } catch (e2) {
+        warn('이전 분석 읽기 실패', e2);
+      }
+      const attempts = prev?.status === 'failed' && prev.reason === 'error' ? (prev.attempts ?? 1) + 1 : 1;
+      a = failed(key, video.sessionId, 'error', { videoStartedAt: video.startedAt, attempts });
     }
     if (disposed) return 'done';
     await finish(a);
@@ -286,7 +315,7 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     async resumePending() {
       for (const key of await store.listVideoKeys()) {
         if (known.has(key)) continue;
-        if (!(await store.getAnalysis(key))) enqueue(key);
+        if (needsAnalysis(await store.getAnalysis(key))) enqueue(key);
       }
     },
     setBusy(b) {
@@ -301,6 +330,7 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     },
     dispose() {
       disposed = true;
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisibility);
       pending.length = 0;
       known.clear();
       listeners.clear();

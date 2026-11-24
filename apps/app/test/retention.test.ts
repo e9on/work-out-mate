@@ -192,4 +192,19 @@ describe('applyRetention', () => {
     await expect(applyRetention({ storage, store, cutter: boom })).resolves.toBeUndefined();
     expect(await store.getVideo(set0('a'))).not.toBeNull();
   });
+
+  it('분석이 failed·error인 오래된 세트는 다시 분석할 수 있게 영상을 지우지 않는다', async () => {
+    const { storage, store } = await world({ analyzeOld: false });
+    await store.putAnalysis({ ...analysis('a', []), status: 'failed', reason: 'error' });
+    const cutter = okCutter();
+    await applyRetention({ storage, store, cutter });
+    expect(await store.getVideo(set0('a'))).not.toBeNull();
+  });
+
+  it('분석이 failed·noPerson인 오래된 세트는 정리한다', async () => {
+    const { storage, store } = await world({ analyzeOld: false });
+    await store.putAnalysis({ ...analysis('a', []), status: 'failed', reason: 'noPerson' });
+    await applyRetention({ storage, store, cutter: okCutter() });
+    expect(await store.getVideo(set0('a'))).toBeNull();
+  });
 });
