@@ -3,18 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' blob: data:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' blob: data:; media-src 'self' blob: mediastream:" />
   <title>Work Out Mate 스파이크</title>
-  <style>
-    body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
-    #app { max-width: 900px; margin: 0 auto; padding: 8px; }
-    #stage { position: relative; width: 100%; background: #000; aspect-ratio: 4 / 3; }
-    #stage video, #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transform: scaleX(-1); }
-    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; align-items: center; }
-    select, button { font-size: 16px; padding: 6px 10px; }
-    button.rec { background: #b3261e; color: #fff; border: 0; }
-    #hud { font-family: ui-monospace, monospace; font-size: 15px; line-height: 1.5; white-space: pre-wrap; background: #1c1c1c; padding: 8px; }
-    #big { font-size: 36px; font-weight: bold; margin: 4px 0; }
-  </style>
 </head>
 <body>
   <div id="app">

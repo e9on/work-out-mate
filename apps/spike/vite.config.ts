@@ -56,8 +56,25 @@ function receiveRecordings(): Plugin {
   };
 }
 
+/**
+ * 개발 서버 전용 CSP 완화. 빌드(Electron·Capacitor에 들어가는 것)에는 index.html의 CSP가 그대로 들어간다.
+ * - style-src 'unsafe-inline': Vite dev가 CSS를 <style> 태그로 주입한다(빌드에서는 외부 css 파일).
+ * - connect-src ws: wss:: Vite HMR 웹소켓(dev는 http:/https: 에 따라 ws:/wss:).
+ */
+function relaxCspForDev(): Plugin {
+  return {
+    name: 'wom-relax-csp-dev',
+    apply: 'serve',
+    transformIndexHtml(html) {
+      return html
+        .replace("connect-src 'self'", "connect-src 'self' ws: wss:")
+        .replace("default-src 'self';", "default-src 'self'; style-src 'self' 'unsafe-inline';");
+    },
+  };
+}
+
 export default defineConfig(({ mode }) =>
   mode === 'lan'
-    ? { plugins: [basicSsl(), receiveRecordings()], server: { host: true, port: 5174, strictPort: true } }
-    : { plugins: [receiveRecordings()], server: { port: 5173, strictPort: true } },
+    ? { plugins: [basicSsl(), receiveRecordings(), relaxCspForDev()], server: { host: true, port: 5174, strictPort: true } }
+    : { plugins: [receiveRecordings(), relaxCspForDev()], server: { port: 5173, strictPort: true } },
 );

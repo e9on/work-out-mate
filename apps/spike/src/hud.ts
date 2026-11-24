@@ -1,9 +1,14 @@
-import type { TrackerState } from '@wom/core';
+import type { Diagnosis, TrackerState } from '@wom/core';
+
+const DIAGNOSIS_NOTE: Record<Diagnosis, string> = {
+  ok: '',
+  notVisible: '  (몸이 안 보여요)',
+  notReady: '  (준비 자세가 아니에요)',
+  calibratedByDefault: '  (기본값으로 보정됨)',
+};
 
 export type HudInfo = {
   state: TrackerState;
-  /** 'hold'(매달리기)면 버틴 초, 'reps'면 횟수만 보여 준다. */
-  kind: 'reps' | 'hold';
   fps: number;
   avgMs: number;
   p95Ms: number;
@@ -21,9 +26,14 @@ export class Hud {
 
   render(i: HudInfo): void {
     const s = i.state;
-    const main = i.kind === 'hold' ? `버틴 시간 ${(s.heldMs / 1000).toFixed(1)}초` : `횟수 ${s.count}`;
-    // 보정 중에는 신호가 끊겨도(paused) 준비 자세 안내를 계속 보여 준다.
-    const note = s.calibrating ? '  (준비 자세를 잡아 주세요)' : s.paused ? '  (일시정지)' : '';
+    // 'hold'(매달리기)면 버틴 초, 'reps'면 횟수를 보여 준다.
+    const main = s.kind === 'hold' ? `버틴 시간 ${(s.heldMs / 1000).toFixed(1)}초` : `횟수 ${s.count}`;
+    // 보정 중에는 신호가 끊겨도 준비 자세 안내를 계속 보여 준다. 그 밖에는 진단 사유를 보여 준다.
+    const calibrating = s.kind === 'reps' && s.phase === 'calibrating';
+    const paused = s.kind === 'reps' ? s.phase === 'paused' : s.diagnosis === 'notVisible';
+    const note = calibrating
+      ? s.diagnosis === 'notVisible' ? '  (준비 자세를 잡아 주세요, 몸이 안 보여요)' : '  (준비 자세를 잡아 주세요)'
+      : paused ? '  (일시정지)' : DIAGNOSIS_NOTE[s.diagnosis];
     this.big.textContent = `${main}${note}`;
     const ko = i.voices.filter((v) => /\(ko/i.test(v)).join(', ');
     this.box.textContent = [

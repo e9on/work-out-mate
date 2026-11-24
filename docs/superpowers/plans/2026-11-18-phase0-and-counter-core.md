@@ -247,7 +247,7 @@ function replay(id: ExerciseId, frames: PoseFrame[]): TrackerState & { reps: Rep
 |---|---|---|---|---|
 | squat | 무릎 각도 (엉덩이-무릎-발목) | high | 150/100/160 | Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함) |
 | pushup | 팔꿈치 각도 | high | **145/120/150** | 근거: S23 옆 바닥 촬영 5회 실측에서 반복 사이 맨 위가 155~157(exit 160 미달), 바닥이 90~114(turn 100 미달 3회)라 실제 1회만 셌음 / Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함) |
-| dumbbellBench | 양팔 팔꿈치 각도의 **평균** (양팔 동시) | high | 150/100/160 | 양팔 다 보여야 함, 한쪽만 보이면 null. Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함). **위험(I3)**: 양팔이 모두 보여야 신호가 나오므로 측면 촬영에서는 0회가 될 수 있다. 실측 필요 |
+| dumbbellBench | 양팔 팔꿈치 각도의 **평균** (양팔 동시) | high | 150/100/160 | 보이는 팔만으로 판단(`meanVisibleArms`: 둘 다 보이면 평균, 한쪽만 보이면 그쪽, 둘 다 안 보이면 null). Task 6b의 adaptive로 대체됨(고정 임계값은 사용 안 함). Phase 2a에서 `bothArmsMean`을 `meanVisibleArms`로 교체해 측면 촬영의 0회 위험(I3)을 줄임. 실측은 나중에 |
 | pullup | **양팔 팔꿈치 각도 평균**(한쪽만 보이면 그쪽, 둘 다 안 보이면 null). 턱·철봉 위치는 보지 않음 — 사용자 결정 | high | 140/80/155 | |
 | negative | **양팔 팔꿈치 각도 평균**(pullup과 동일 규칙) | low | **100/140/95**, `countAt: 'turn'`, **minRepMs 250** | `RepEvent.outMs` = 내려온 시간. 근거: S23 실측 enter→turn이 284~387ms라 minRepMs 500이면 2·3번째가 버려져 250으로 낮춤(교정은 outMs로 따로). 또 위로 올라가는 동작은 점프라 마지막 반복이 안 세졌고, 좌우 한쪽만 쓰면 덜 펴진 팔 때문에 turn에 못 닿았으며, 맨 위 양팔 평균이 53~85°(바닥 145~159°)였다 |
 | deadHang | holding = 두 손목이 코보다 위 && 양 팔꿈치 각도 ≥ 150 | — | startAfterMs 300, graceMs 500 | |
@@ -257,7 +257,7 @@ function replay(id: ExerciseId, frames: PoseFrame[]): TrackerState & { reps: Rep
 - [ ] **Step 1: 실패하는 테스트** — `buildPose`/`series`로:
   - 운동마다 "완전한 1회" 각도 열 → `replay(id).count === 1` (deadHang은 `wristAboveNose:true, elbow:170` 5초 → `heldMs` ≈ 5000±100, 시작 시각은 처음 true 프레임이므로 startAfterMs를 빼지 않는다)
   - pullup: 팔꿈치가 80°까지 굽혔다 펴지면 코·손목 위치와 상관없이 1 (팔 각도로만 판별)
-  - dumbbellBench: 한쪽 팔(13,15) `hidden` → 신호 null → count 0, `paused` true
+  - dumbbellBench: 한쪽 팔(13,15) `hidden` → 보이는 팔로 1회, `paused` false. 양팔 모두 `hidden` → count 0, `paused` true
   - negative: `reps[0].outMs`가 내려온 구간 시간(±50)
   - `createTracker`를 프레임 단위로 push한 결과와 `replay` 결과가 같다
 - [ ] **Step 2: 실패 확인**

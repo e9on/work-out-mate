@@ -32,7 +32,9 @@ describe('합격 테스트 (실제 녹화)', () => {
   for (const entry of manifest) {
     test(`${entry.file} (${entry.exercise})`, () => {
       const rec = JSON.parse(readFileSync(join(privateDir, entry.file), 'utf8')) as RecordingFile;
-      const r = replay(entry.exercise, rec.frames);
+      const res = replay(entry.exercise, rec.frames);
+      // 상태 유니온에서 해당 값만 꺼낸다(해당 없는 운동은 0).
+      const r = { count: res.kind === 'reps' ? res.count : 0, heldMs: res.kind === 'hold' ? res.heldMs : 0 };
 
       if (entry.expectedCount !== undefined) {
         expect(

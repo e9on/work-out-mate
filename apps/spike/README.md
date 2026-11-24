@@ -52,6 +52,8 @@ adb exec-out run-as com.workoutmate.spike cat files/<파일명> > <파일명>
 
 Windows PowerShell의 `>`는 출력을 문자열로 바꿔 깨질 수 있으니 Git Bash나 cmd에서 실행한다(JSON 텍스트라 대개 문제없지만 인코딩이 바뀔 수 있다).
 
+CSP(`index.html`의 meta, 설계 문서 5.7)가 renderer 단계에서도 외부 연결을 막는다. 폰에서 확인하려면 APK를 설치해 카메라 시작 → 모델 lite/full, GPU/CPU를 바꿔 보며 포즈 점이 그려지는지 본다(wasm·워커가 CSP에 막히면 HUD에 오류가 뜨거나 "카메라 시작"이 실패한다). PC에서 같은 CSP로 위 네 조합이 돌아가는 것은 Electron 자가 점검으로 확인했다.
+
 이 앱은 AndroidManifest에 INTERNET 권한이 없다(네트워크 요청 0건을 OS 수준에서 보장). 그래서 `cap run --live-reload`는 쓸 수 없다. 개발은 `dev:lan`(브라우저)으로 한다.
 
 ## PC 앱 (Electron)
@@ -76,5 +78,7 @@ cd apps/spike
 WOM_SELFTEST=1 npx electron .                                   # electron:build 후
 WOM_SELFTEST=1 out/WorkOutMateSpike-win32-x64/WorkOutMateSpike.exe   # 포장된 exe
 ```
+
+자가 점검에는 renderer 단계 차단 확인도 들어 있다. fetch, XMLHttpRequest, sendBeacon으로 `https://example.com`을 시도하고 `securitypolicyviolation` 이벤트 수를 센다(CSP가 있으면 3건, 없으면 0건이고 main의 webRequest가 대신 막는다). 개발 서버(`dev`, `dev:lan`)에서는 Vite 때문에 CSP가 약간 완화된다(`vite.config.ts`의 `relaxCspForDev`, 빌드에는 적용 안 됨).
 
 사용자 확인 순서: exe 실행 → "카메라 시작"(Windows 카메라 개인정보 설정이 꺼져 있으면 실패) → 처리 장치 GPU/CPU, lite/full로 FPS·추론 ms 확인 → "음성 테스트"(HUD 음성 목록에 Microsoft Heami가 보여야 함) → 녹화 시작/정지 → HUD의 저장 경로 확인. 패키지 앱에는 콘솔 보안 경고(CSP)가 나오지 않는다.
