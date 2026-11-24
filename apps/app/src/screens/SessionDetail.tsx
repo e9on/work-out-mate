@@ -67,6 +67,7 @@ export function SessionDetail({ storage, sessionId, onBack, mediaStore, analysis
             {formatDateTime(session.endedAt)} · {session.completed ? '완료' : '미완료'}
           </p>
           <SetTable sets={session.sets} />
+          {mediaStore && <FormFindings store={mediaStore} queue={analysisQueue} sessionId={session.id} session={session} onPlay={onPlay} />}
         </>
       )}
       {notice && <p role="status">{notice}</p>}
