@@ -128,6 +128,28 @@ describe('computeSquatRepMetrics', () => {
     expect(m.kneeDeg).toBeCloseTo(80, 0);
   });
 
+  it('먼 발 점수 0.2, 가까운 발 0.8이어도 두 발 모두 써서 뒤꿈치 값을 낸다', () => {
+    const frames: KpFrame[] = [];
+    for (let t = 0; t <= 1000; t += 50) frames.push(buildHalpe({ t, kneeDeg: 175, kneeAnkleRatio: 1, heelRise: 0.0, heelRiseR: 0.1, score: 0.8, footScoreL: 0.2 }));
+    for (let t = 1050; t <= 2000; t += 50) frames.push(buildHalpe({ t, kneeDeg: 80, kneeAnkleRatio: 1.5, heelRise: 0.4, heelRiseR: 0.6, score: 0.8, footScoreL: 0.2 }));
+    const m = computeSquatRepMetrics(frames, [{ index: 1, startT: 800, bottomT: 1500, endT: 2000 }])[0]!;
+    // 왼발 0.4-0.0, 오른발 0.6-0.1 -> 평균 0.45 (왼발을 버리면 0.5)
+    expect(m.heelRise).toBeCloseTo(0.45, 2);
+  });
+
+  it('한쪽 발 점수가 0.1이면 그 발은 빼고 나머지 발로 계산한다', () => {
+    const frames: KpFrame[] = [];
+    for (let t = 0; t <= 1000; t += 50) frames.push(buildHalpe({ t, kneeDeg: 175, kneeAnkleRatio: 1, heelRise: 0.0, heelRiseR: 0.0, footScoreR: 0.1 }));
+    for (let t = 1050; t <= 2000; t += 50) frames.push(buildHalpe({ t, kneeDeg: 80, kneeAnkleRatio: 1.5, heelRise: 0.3, heelRiseR: 0.9, footScoreR: 0.1 }));
+    const m = computeSquatRepMetrics(frames, [{ index: 1, startT: 800, bottomT: 1500, endT: 2000 }])[0]!;
+    expect(m.heelRise).toBeCloseTo(0.3, 2);
+    const none = computeSquatRepMetrics(
+      frames.map((f) => ({ t: f.t, kps: f.kps!.map((p, i) => (i === 20 || i === 21 || i === 24 || i === 25 ? { ...p, score: 0.1 } : p)) })),
+      [{ index: 1, startT: 800, bottomT: 1500, endT: 2000 }],
+    )[0]!;
+    expect(none.heelRise).toBeNull();
+  });
+
   it('서 있는 프레임이 없으면 비율·뒤꿈치·하강시간은 null', () => {
     const frames: KpFrame[] = [];
     for (let t = 0; t <= 2000; t += 50) frames.push(buildHalpe({ t, kneeDeg: 80, kneeAnkleRatio: 1.5, heelRise: 0.05 }));
@@ -227,5 +249,6 @@ describe.skipIf(!existsSync(privateFile))('스쿼트 판정: 개인 녹화 회�
     expect(by('depth'), summary).toEqual([17, 18, 19, 20]);
     expect(by('kneeIn'), summary).toEqual([5, 6, 7, 8]);
     expect(by('heel'), summary).toEqual([9, 10, 11, 12]);
+    expect(by('kneeInRelative'), summary).toEqual([]);
   });
 });

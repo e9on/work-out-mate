@@ -20,6 +20,11 @@ export type HalpeOpts = {
   shankScale?: number;
   /** 허벅지 길이 배수(45도 시점 단축 시험용) */
   thighScale?: number;
+  /** 발(엄지발가락·뒤꿈치) 점수를 발마다 따로 */
+  footScoreL?: number;
+  footScoreR?: number;
+  /** 오른발 뒤꿈치 값만 따로 */
+  heelRiseR?: number;
 };
 
 /** 단순 정면 투영 관절점(26개 중 쓰는 10점만 의미 있음). */
@@ -45,7 +50,8 @@ export function buildHalpe(o: HalpeOpts): KpFrame {
     const sh = shank * scale;
     const ankle = { x: kx + dx * sh, y: ky + dy * sh };
     const toeY = ankle.y + 10;
-    const heelY = toeY - o.heelRise * sh;
+    const heelY = toeY - (side === 1 ? (o.heelRiseR ?? o.heelRise) : o.heelRise) * sh;
+    const footScore = (side === -1 ? o.footScoreL : o.footScoreR) ?? score;
     const [hip, knee, ank, toe, heel] =
       side === -1
         ? [HALPE.L_HIP, HALPE.L_KNEE, HALPE.L_ANKLE, HALPE.L_BIG_TOE, HALPE.L_HEEL]
@@ -53,8 +59,8 @@ export function buildHalpe(o: HalpeOpts): KpFrame {
     kps[hip] = { x: kx + hx * THIGH * (o.thighScale ?? 1), y: ky + hy * THIGH * (o.thighScale ?? 1), score };
     kps[knee] = { x: kx, y: ky, score };
     kps[ank] = { x: ankle.x, y: ankle.y, score };
-    kps[toe] = { x: ankle.x, y: toeY, score };
-    kps[heel] = { x: ankle.x, y: heelY, score };
+    kps[toe] = { x: ankle.x, y: toeY, score: footScore };
+    kps[heel] = { x: ankle.x, y: heelY, score: footScore };
   }
   return { t: o.t, kps };
 }

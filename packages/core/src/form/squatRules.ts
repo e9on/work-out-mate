@@ -23,6 +23,7 @@ export const SQUAT_RULES = {
   oneLegStraightDeg: 150,
   oneLegBentDeg: 120,
   minScore: 0.3,
+  footMinScore: 0.15,
 } as const;
 
 export type SquatRepMetrics = {
@@ -88,7 +89,8 @@ type FrameInfo = {
   kneeDeg: number;
   kneeGap: number;
   ankleGap: number;
-  heel: number | null;
+  /** 발마다(왼, 오른) 뒤꿈치 값. 그 발의 엄지발가락·뒤꿈치 점수가 footMinScore 미만이면 null */
+  heel: [number | null, number | null];
 };
 
 function analyzeFrames(frames: KpFrame[]): FrameInfo[] {
@@ -115,22 +117,20 @@ function analyzeFrames(frames: KpFrame[]): FrameInfo[] {
       if (off(r[li]!.thigh, median(th)) || off(r[li]!.shank, median(sh))) return;
     }
     const k = f.kps;
-    // 뒤꿈치: 엄지발가락·뒤꿈치 점수가 충분한 다리만 평균
-    const heels: number[] = [];
-    LEGS.forEach((leg, li) => {
+    // 뒤꿈치: 발마다 따로. 엄지발가락·뒤꿈치 점수가 footMinScore 이상일 때만(무릎·발목은 위에서 이미 검사)
+    const heels = LEGS.map((leg, li) => {
       const toe = k[leg.toe];
       const heel = k[leg.heel];
-      if (toe && heel && toe.score >= SQUAT_RULES.minScore && heel.score >= SQUAT_RULES.minScore && r[li]!.shank > 0) {
-        heels.push((toe.y - heel.y) / r[li]!.shank);
-      }
-    });
+      const fm = SQUAT_RULES.footMinScore;
+      return toe && heel && toe.score >= fm && heel.score >= fm && r[li]!.shank > 0 ? (toe.y - heel.y) / r[li]!.shank : null;
+    }) as [number | null, number | null];
     out.push({
       t: f.t,
       legDeg: [r[0].deg, r[1].deg],
       kneeDeg: (r[0].deg + r[1].deg) / 2,
       kneeGap: dist(k[HALPE.L_KNEE]!, k[HALPE.R_KNEE]!),
       ankleGap: dist(k[HALPE.L_ANKLE]!, k[HALPE.R_ANKLE]!),
-      heel: heels.length ? heels.reduce((a, b) => a + b, 0) / heels.length : null,
+      heel: heels,
     });
   });
   return out;
@@ -142,7 +142,8 @@ export function computeSquatRepMetrics(frames: KpFrame[], reps: RepTiming[]): Sq
   const standing = infos.filter((f) => f.kneeDeg > SQUAT_RULES.standingKneeDeg);
   const standKnee = median(standing.map((f) => f.kneeDeg));
   const standAnkleGap = median(standing.map((f) => f.ankleGap));
-  const standHeel = median(standing.flatMap((f) => (f.heel === null ? [] : [f.heel])));
+  const footVals = (fs: FrameInfo[], li: 0 | 1) => fs.flatMap((f) => (f.heel[li] === null ? [] : [f.heel[li]!]));
+  const standHeel = [median(footVals(standing, 0)), median(footVals(standing, 1))];
 
   return reps.map((rep): SquatRepMetrics => {
     const base = { index: rep.index, bottomT: rep.bottomT };
@@ -161,8 +162,14 @@ export function computeSquatRepMetrics(frames: KpFrame[], reps: RepTiming[]): Sq
     const gap = median(win.map((f) => f.kneeGap))!;
     const kneeAnkleRatio = standAnkleGap !== null && standAnkleGap > 0 ? gap / standAnkleGap : null;
 
-    const bottomHeel = median(win.flatMap((f) => (f.heel === null ? [] : [f.heel])));
-    const heelRise = bottomHeel !== null && standHeel !== null ? bottomHeel - standHeel : null;
+    // 발마다 (바닥 값 - 서 있을 때 값)을 구하고, 둘 다 있는 발만 평균
+    const rises: number[] = [];
+    for (const li of [0, 1] as const) {
+      const bh = median(footVals(win, li));
+      const sh = standHeel[li];
+      if (bh !== null && sh !== null && sh !== undefined) rises.push(bh - sh);
+    }
+    const heelRise = rises.length ? rises.reduce((a, b) => a + b, 0) / rises.length : null;
 
     // 하강 시작: 바닥 전 구간(startT~bottomT)에서 무릎 각도가 서 있음 기준-15도 아래로 처음 내려간 프레임
     let descentMs: number | null = null;
