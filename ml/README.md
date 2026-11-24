@@ -1,5 +1,27 @@
 # ml - 자세 오류 분류 파인튜닝 실험
 
+설계: `docs/specs/2026-11-25-finetune-experiment-design.md` / 결과 보고서: `docs/finetune-experiment-results.md`
+
+## 처음부터 끝까지 실행 순서
+
+PowerShell, 저장소 루트(`C:\Coding\work-out-mate`) 기준. 각 단계의 자세한 설명은 아래 절에 있다.
+
+| 순서 | 할 일 | 명령 | 확인 |
+|---|---|---|---|
+| 1 | 환경(CUDA판 PyTorch·패키지) | `powershell -File ml/setup_env.ps1` | `python -m pytest ml/tests/test_env.py` |
+| 2 | 데이터·MotionBERT 코드 받기 | `python ml/scripts/fetch_data.py` | `ml/data/raw/{zenodo,ec3d}`, `ml/third_party/MotionBERT`에 `.done` |
+| 3 | MotionBERT-Lite 가중치 **수동** 받기 | 브라우저로 받아 `ml/weights/motionbert_lite.bin`에 둔다(아래 '가중치' 절) | `python -m pytest ml/tests/test_motionbert.py`에서 실가중치 테스트가 skip 없이 통과 |
+| 4 | 데이터 요약(분할·라벨 개수) | `cd ml; python -m wom_ml.dataset --summary; cd ..` | `ml/runs/dataset_summary.json` |
+| 5 | 전체 단계 실행 | `python ml/scripts/run_all.py` (먼저 `--dry-run`으로 계획 확인) | `ml/runs/run_all_status.json`의 단계가 모두 `done` |
+| 6 | 보고서 표 다시 만들기 | `cd ml; python -m wom_ml.report; cd ..` | `docs/finetune-experiment-results.md`의 자동 생성 절이 바뀜 |
+| 7 | 해석 보완 | 보고서의 '해석' 절(사람이 씀)에서 '(가중치 받은 뒤 채움)' 자리를 채운다 | — |
+
+- 개인 녹화(본인 스쿼트)는 `packages/core/test/fixtures/private/angle-test/`(git 제외)에 있어야 4·5단계의 test_own·규칙 판정이 돈다. 읽기만 한다.
+- 5단계의 규칙 판정(rules)은 node와 `npx esbuild`(저장소 node_modules)를 쓴다.
+- 3단계 없이 5단계를 돌리면 rules·small만 돌고 MotionBERT 단계는 `skipped_no_weights`로 남는다(종료 코드 2). 가중치를 넣고 5단계를 다시 돌리면 MotionBERT 단계만 이어서 돈다.
+- 6단계는 `ml/runs/`의 집계 지표만 읽는다. 보고서 파일에서 `<!-- report:start ... -->`~`<!-- report:end -->` 사이만 바꾸고, 그 밖의 사람이 쓴 글은 그대로 둔다. 화면에만 보려면 `--stdout`.
+- 전체 테스트: `python -m pytest ml/tests -q`
+
 ## 환경
 
 - 대상: 전역 Python 3.11(conda 환경은 건드리지 않음), GPU RTX 4060 Ti 8GB, 드라이버 616.92
