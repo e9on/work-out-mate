@@ -6,6 +6,7 @@ const END_REASON: Record<EndReason, string> = {
   target: '목표 달성',
   idle: '멈춤',
   manual: '그만하기',
+  button: '세트 끝',
   released: '손 놓음',
 };
 

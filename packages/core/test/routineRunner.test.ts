@@ -1018,3 +1018,66 @@ describe('RoutineRunner.snapshot · sessionSoFar (2b 작업 2)', () => {
     expect(d.rr.sessionSoFar(lastT + 500).endedAt).toBe(1_000_000 + lastT + 500);
   });
 });
+
+describe('RoutineRunner.endSet (세트 끝 버튼)', () => {
+  // 앱은 idle 자동 종료를 끈다(idleEndMs: Infinity). 세트는 목표 도달이나 endSet으로만 끝난다.
+  const noIdle = { idleEndMs: Infinity };
+
+  it('세트 중 반복 2회 뒤 endSet: button으로 기록하고 쉬는 시간으로 간다. 끝까지 하면 completed true', () => {
+    const d = runner([sq(2, 5, 10)], undefined, noIdle);
+    d.frames('squat', [...hold(175, 1000), ...reps(175, 90, 2), ...hold(175, 3000)]);
+    const evs = d.rr.endSet(d.t);
+    expect(evs.map((e) => (e.type === 'set' ? `set:${e.event.type}` : e.type))).toEqual([
+      'set:finished',
+      'restStart',
+      'nextUp',
+    ]);
+    expect(d.rr.phase).toBe('rest');
+    d.log.push(...evs.map((ev) => ({ t: d.t, ev })));
+    d.tickUntilRestEnd();
+    d.doSet('squat', 5);
+    const s = sessionOf(d.log);
+    expect(s.completed).toBe(true);
+    expect(s.sets.map((x) => [x.setIndex, x.count, x.endReason])).toEqual([
+      [0, 2, 'button'],
+      [1, 5, 'target'],
+    ]);
+  });
+
+  it('idle 자동 종료를 끄면 마지막 반복 뒤 오래 서 있어도 세트가 끝나지 않는다', () => {
+    const d = runner([sq(1, 5, 10)], undefined, noIdle);
+    d.frames('squat', [...hold(175, 1000), ...reps(175, 90, 2), ...hold(175, 30000)]);
+    expect(d.log.some((x) => isSetFinished(x.ev))).toBe(false);
+    expect(d.rr.snapshot(d.t).set?.count).toBe(2);
+  });
+
+  it('마지막 세트에서 endSet이면 routineEnd(completed true)', () => {
+    const d = runner([sq(1, 5, 10)], undefined, noIdle);
+    d.frames('squat', [...hold(175, 1000), ...reps(175, 90, 3), ...hold(175, 3000)]);
+    const evs = d.rr.endSet(d.t);
+    expect(evs.at(-1)!.type).toBe('routineEnd');
+    const s = (evs.at(-1) as Extract<RoutineEvent, { type: 'routineEnd' }>).session;
+    expect(s.completed).toBe(true);
+    expect(s.sets.map((x) => x.count)).toEqual([3]);
+  });
+
+  it('반복이 0이면(버튼 누르며 센 반복을 되돌린 경우 포함) 기록하지 않고 쉬는 시간으로 간다', () => {
+    const d = runner([sq(2, 5, 10)], undefined, noIdle);
+    d.frames('squat', [...hold(175, 1000), ...reps(175, 90, 1)]);
+    // 마지막 반복 직후(1.5초 안) 버튼: 그 반복은 버튼을 누르러 오며 센 것으로 보고 되돌린다.
+    const evs = d.rr.endSet(d.t);
+    expect(evs.map((e) => e.type)).toEqual(['set', 'restStart', 'nextUp']);
+    expect(d.rr.sessionSoFar(d.t).sets).toEqual([]);
+  });
+
+  it('세트가 시작되기 전(준비 자세 대기)이나 쉬는 시간에는 []이고 아무것도 바뀌지 않는다', () => {
+    const d = runner([sq(2, 2, 10)], undefined, noIdle);
+    d.frames('squat', hold(175, 300));
+    expect(d.rr.endSet(d.t)).toEqual([]);
+    expect(d.rr.snapshot(d.t).set?.setPhase).toBe('waitingReady');
+    d.doSet('squat', 2);
+    expect(d.rr.phase).toBe('rest');
+    expect(d.rr.endSet(d.t + 100)).toEqual([]);
+    expect(d.rr.phase).toBe('rest');
+  });
+});

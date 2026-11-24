@@ -381,7 +381,7 @@ describe('WorkoutEngine: 저장', () => {
 });
 
 describe('WorkoutEngine: visibility(10.1 결정)', () => {
-  it('세트 중 hidden이면 paused가 되고, visible로 돌아와도 자동 재개하지 않으며, resume 뒤 4초 동안 idle 종료가 없다', async () => {
+  it('세트 중 hidden이면 paused가 되고, visible로 돌아와도 자동 재개하지 않으며, resume 뒤에도 세트가 저절로 끝나지 않는다', async () => {
     const r = makeRig([sq(1, 5, 0)]);
     const e = new WorkoutEngine(r.deps);
     r.attach(e);
@@ -396,9 +396,8 @@ describe('WorkoutEngine: visibility(10.1 결정)', () => {
     expect(r.last.paused).toBe(true);
     e.resume();
     expect(r.last.paused).toBe(false);
-    expect(r.frames(hold(175, 4000), isSetFinished)).toBe(false);
-    // 4초가 헛것이 아님을 확인: 조금 더 가만히 있으면 idle로 끝난다
-    expect(r.frames(hold(175, 1500), isSetFinished)).toBe(true);
+    // 세트는 목표 도달이나 세트 끝 버튼으로만 끝난다(idle 자동 종료 없음)
+    expect(r.frames(hold(175, 15000), isSetFinished)).toBe(false);
   });
 
   it('쉬는 시간 중 hidden이면 남은 시간이 멈춘다', async () => {
@@ -546,6 +545,37 @@ describe('WorkoutEngine: 카메라 오류', () => {
     await e.start(video());
     e.dispose();
     expect(cancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('WorkoutEngine: 세트 끝 버튼', () => {
+  it('마지막 반복 뒤 30초 서 있어도 세트가 끝나지 않고, endSet이면 "세트를 마칠게요, 2회, 쉬는 시간 60초"를 말하고 button으로 중간 저장한다', async () => {
+    const r = makeRig([sq(2, 5, 60)]);
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    await e.start(video());
+    expect(r.frames([...hold(175, 1000), ...hold(175, 3500), ...reps(2)], isRep(2))).toBe(true);
+    expect(r.frames(hold(175, 30000), isSetFinished)).toBe(false);
+    expect(r.last.set?.count).toBe(2);
+    e.endSet();
+    await flush();
+    expect(r.last.phase).toBe('rest');
+    expect(r.spoken.at(-1)).toBe('세트를 마칠게요, 2회, 쉬는 시간 60초');
+    const saved = await r.storage.getSession('s1');
+    expect(saved?.sets.map((x) => [x.count, x.endReason])).toEqual([[2, 'button']]);
+    e.dispose();
+  });
+
+  it('세트가 시작되기 전에는 endSet이 아무것도 하지 않는다', async () => {
+    const r = makeRig([sq(2, 5, 60)]);
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    await e.start(video());
+    r.frames(hold(175, 300));
+    e.endSet();
+    expect(r.last.phase).toBe('set');
+    expect(r.last.set?.setPhase).toBe('waitingReady');
+    e.dispose();
   });
 });
 

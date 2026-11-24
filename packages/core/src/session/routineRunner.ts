@@ -216,6 +216,28 @@ export class RoutineRunner {
     return out;
   }
 
+  /**
+   * 세트 끝 버튼: 진행 중(active) 세트를 SetRunner.stop으로 끝내고(직전 반복 되돌리기 포함, endReason 'button')
+   * 목표 도달 때와 같이 쉬는 시간(마지막 세트면 routineEnd)으로 간다. 정상 진행이라 completed에는 영향이 없다.
+   * 반복이 0이면(count 0, heldMs 0) 기록하지 않는다. 세트가 시작되기 전이나 쉬는 시간이면 [].
+   * 일시정지 중이면 일시정지를 풀고 진행한다.
+   */
+  endSet(t: number): RoutineEvent[] {
+    if (this.ph !== 'set' || this.runner.phase !== 'active') return [];
+    const out = this.takePending();
+    const now = Math.max(t, this.lastT);
+    for (const ev of this.runner.stop(t, 'button')) {
+      out.push(this.wrap(ev));
+      if (ev.type !== 'finished') continue;
+      const r = ev.result;
+      if (r.count > 0 || r.heldMs > 0) this.record(r);
+      this.pausedAt = null;
+      this.lastT = now;
+      this.afterSet(r.endT, out);
+    }
+    return out;
+  }
+
   /** 루틴 전체를 끝낸다. 진행 중 세트는 SetRunner.stop으로 끝내고 반복이 있으면 기록한다. completed false */
   stop(t: number): RoutineEvent[] {
     if (this.ph === 'done') return [];

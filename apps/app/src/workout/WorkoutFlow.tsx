@@ -68,6 +68,7 @@ export function WorkoutFlow({ routine, storage, onHome, deps }: WorkoutFlowProps
           onPause={() => engine.pause()}
           onResume={() => engine.resume()}
           onSkip={() => engine.skipExercise()}
+          onEndSet={() => engine.endSet()}
           onStop={() => void engine.stop()}
         />
       );

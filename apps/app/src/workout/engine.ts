@@ -65,6 +65,8 @@ export class WorkoutEngine {
       startT: d.now(),
       sessionId: d.newId(),
       toEpoch: (t) => t + d.epochOffset,
+      // 세트는 목표 도달이나 세트 끝 버튼으로만 끝낸다(마지막 반복 뒤 멈춤으로 끝내지 않는다. 2026-11-24 실기기 확인 뒤 결정)
+      set: { idleEndMs: Infinity },
     });
   }
 
@@ -139,6 +141,12 @@ export class WorkoutEngine {
   skipRest(): void {
     if (!this.canControl()) return;
     void this.handle(this.runner.skipRest(this.d.now()));
+  }
+
+  /** 세트 끝 버튼: 진행 중 세트를 끝내고 쉬는 시간(마지막 세트면 루틴 끝)으로 간다 */
+  endSet(): void {
+    if (!this.canControl()) return;
+    void this.handle(this.runner.endSet(this.d.now()));
   }
 
   skipExercise(): void {

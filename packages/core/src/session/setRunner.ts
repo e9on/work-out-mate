@@ -255,7 +255,8 @@ export class SetRunner {
     this.lastT = Math.max(this.lastT, t);
   }
 
-  stop(t: number): SetEvent[] {
+  /** 세트를 손으로 끝낸다. reason: 'manual' 그만하기·건너뛰기(기본), 'button' 세트 끝 버튼 */
+  stop(t: number, reason: 'manual' | 'button' = 'manual'): SetEvent[] {
     if (this.ph === 'finished') return [];
     // 지금까지 본 시각보다 이른 stop은 그 시각으로 본다. 일시정지 중이면 시간은 일시정지한 순간에 멈춰 있다.
     const now = Math.max(t, this.lastT);
@@ -271,7 +272,7 @@ export class SetRunner {
     }
     // 그만하기를 누르려고 움직이다 잘못 센 반복을 되돌린다(#1).
     this.reps = this.reps.filter((r) => !(r.endT > ref - this.undoMs));
-    this.finish(now, 'manual', out);
+    this.finish(now, reason, out);
     return out;
   }
 

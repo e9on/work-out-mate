@@ -5,10 +5,11 @@ export type Target = { kind: 'reps'; reps: number } | { kind: 'seconds'; seconds
 
 /**
  * 세트가 끝난 이유.
- * target 목표 도달 / idle 마지막 반복 뒤 반복 없음 / manual 그만하기 / released 매달리기에서 손을 놓음.
+ * target 목표 도달 / idle 마지막 반복 뒤 반복 없음 / manual 그만하기·건너뛰기 / button 세트 끝 버튼 /
+ * released 매달리기에서 손을 놓음.
  * 시작 뒤 첫 반복이 없으면 세트를 끝내지 않고 준비 자세 대기로 돌아가므로(backToReady) 종료 사유가 아니다.
  */
-export type EndReason = 'target' | 'idle' | 'manual' | 'released';
+export type EndReason = 'target' | 'idle' | 'manual' | 'button' | 'released';
 
 /** 세트 기록. 시각(startT·endT)은 프레임 시계(PoseFrame.t)와 같은 ms 단위다. */
 export type SetResult = {
@@ -50,7 +51,7 @@ export type SetLog = SetResult & { exerciseIndex: number; setIndex: number; rest
 
 /**
  * 루틴 한 번 진행한 기록. startT/endT(각 SetLog)/startedAt/endedAt은 모두 toEpoch로 바꾼 절대 시각이다.
- * completed는 모든 운동의 모든 세트가 그만하기(manual) 아닌 사유로 끝나고 건너뛰기·그만하기가 없었을 때만 true.
+ * completed는 모든 운동의 모든 세트가 그만하기(manual) 아닌 사유로(세트 끝 버튼 button은 정상 종료) 끝나고 건너뛰기·그만하기가 없었을 때만 true.
  */
 export type WorkoutSession = {
   id: string;

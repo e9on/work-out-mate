@@ -21,7 +21,7 @@ function setPhrase(e: SetEvent, exerciseIndex: number, ctx: Ctx): string | null 
       return ex.target.kind === 'reps' ? '목표 달성, 세트 끝' : '목표 달성';
     }
     case 'finished': {
-      if (e.reason === 'idle') {
+      if (e.reason === 'idle' || e.reason === 'button') {
         return e.result.count > 0 ? `세트를 마칠게요, ${e.result.count}회` : null;
       }
       if (e.reason === 'released') {

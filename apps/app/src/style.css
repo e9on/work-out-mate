@@ -205,6 +205,7 @@ body {
 .workout-actions {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 16px;
   background: rgba(0, 0, 0, 0.55);
@@ -221,6 +222,17 @@ body {
 }
 .danger {
   color: #ff8a8a;
+}
+/* 세트 끝: 폰 앞에 와서 바로 누를 수 있게 한 줄을 다 쓰는 큰 버튼 */
+.workout-actions .end-set {
+  flex-basis: 100%;
+  min-height: 72px;
+  font-size: 1.4rem;
+  font-weight: 700;
+  background: #ffe08a;
+  color: #111;
+  border: none;
+  border-radius: 8px;
 }
 .screen-cover {
   position: absolute;

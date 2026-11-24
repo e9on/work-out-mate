@@ -52,7 +52,7 @@ function view(p: Partial<EngineView> = {}): EngineView {
 }
 
 function renderWorkout(v: EngineView) {
-  const cb = { onPause: vi.fn(), onResume: vi.fn(), onSkip: vi.fn(), onStop: vi.fn() };
+  const cb = { onPause: vi.fn(), onResume: vi.fn(), onSkip: vi.fn(), onStop: vi.fn(), onEndSet: vi.fn() };
   const pose = new FakePose();
   const r = render(<Workout view={v} routine={ROUTINE} pose={pose} {...cb} />);
   const rerender = (nv: EngineView) => r.rerender(<Workout view={nv} routine={ROUTINE} pose={pose} {...cb} />);
@@ -125,6 +125,22 @@ describe('Workout 화면', () => {
     expect(status(container)).toBe('일시정지');
     fireEvent.click(screen.getByRole('button', { name: '다시 시작' }));
     expect(cb.onResume).toHaveBeenCalledTimes(1);
+  });
+
+  it('세트 중(active)에만 "세트 끝" 버튼이 있고, 누르면 endSet을 부른다', () => {
+    const { cb, rerender } = renderWorkout(view());
+    fireEvent.click(screen.getByRole('button', { name: '세트 끝' }));
+    expect(cb.onEndSet).toHaveBeenCalledTimes(1);
+    rerender(view({ set: setPart({ setPhase: 'waitingReady' }) }));
+    expect(screen.queryByRole('button', { name: '세트 끝' })).toBeNull();
+    rerender(view({ set: setPart({ setPhase: 'countdown', countdownRemainingMs: 2000 }) }));
+    expect(screen.queryByRole('button', { name: '세트 끝' })).toBeNull();
+  });
+
+  it('일시정지 중에도 "세트 끝"을 누를 수 있다(폰 앞에 와서 멈춘 김에 끝내기)', () => {
+    const { cb } = renderWorkout(view({ paused: true }));
+    fireEvent.click(screen.getByRole('button', { name: '세트 끝' }));
+    expect(cb.onEndSet).toHaveBeenCalledTimes(1);
   });
 
   it('건너뛰기는 skipExercise를 부른다', () => {
@@ -319,6 +335,17 @@ describe('WorkoutFlow: 화면 선택', () => {
     expect(container.querySelector('.rest .big-number')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '건너뛰기' }));
     expect(screen.getByText('스쿼트 2/2세트')).toBeInTheDocument();
+  });
+
+  it('목표 전에 "세트 끝"을 누르면 Rest 화면으로 간다', async () => {
+    const fw = makeFakeWorkout();
+    const r5: Routine = { ...squat2, exercises: [{ ...squat2.exercises[0]!, target: { kind: 'reps', reps: 5 } }] };
+    const { container } = render(<WorkoutFlow routine={r5} storage={createMemoryStorage()} onHome={vi.fn()} deps={fw.deps} />);
+    await flush();
+    act(() => fw.doSquatSet(2));
+    expect(container.querySelector('.rest')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '세트 끝' }));
+    expect(screen.getByText('다음: 스쿼트 2세트 5회')).toBeInTheDocument();
   });
 
   it('그만하기를 확인하면 Summary로 가고, 홈으로를 눌러야 onHome을 부른다', async () => {

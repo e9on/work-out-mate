@@ -73,6 +73,8 @@ describe('phraseFor', () => {
     expect(phraseFor(finished('released', { heldMs: 400 }, 1), ctx)).toBeNull();
     expect(phraseFor(finished('released', { heldMs: 0 }, 1), ctx)).toBeNull();
     expect(phraseFor(finished('manual', { count: 5 }), ctx)).toBeNull();
+    expect(phraseFor(finished('button', { count: 6 }), ctx)).toBe('세트를 마칠게요, 6회');
+    expect(phraseFor(finished('button', { count: 0 }), ctx)).toBeNull();
     expect(phraseFor(finished('target', { count: 10 }), ctx)).toBeNull();
   });
   it('rest', () => {

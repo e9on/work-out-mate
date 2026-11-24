@@ -15,13 +15,15 @@ export type WorkoutProps = {
   onResume: () => void;
   onSkip: () => void;
   onStop: () => void;
+  /** 세트 끝 버튼(세트 중 active일 때만 보인다) */
+  onEndSet: () => void;
 };
 
 /**
  * 세트 중 화면: 관절 오버레이, "{운동} {세트+1}/{세트 수}세트", 큰 숫자(횟수 또는 버틴 초), 상태 문구, 버튼.
  * 카메라 <video>는 WorkoutFlow가 늘 마운트해 두고, 이 화면은 그 위에 겹친다.
  */
-export function Workout({ view, routine, pose, getVideo, onPause, onResume, onSkip, onStop }: WorkoutProps) {
+export function Workout({ view, routine, pose, getVideo, onPause, onResume, onSkip, onStop, onEndSet }: WorkoutProps) {
   const [confirming, setConfirming] = useState(false);
   const hint = useLastHint(view, routine);
   const ex = routine.exercises[view.exerciseIndex];
@@ -49,6 +51,11 @@ export function Workout({ view, routine, pose, getVideo, onPause, onResume, onSk
         </p>
       </div>
       <div className="workout-actions">
+        {set?.setPhase === 'active' && (
+          <button type="button" className="primary end-set" onClick={onEndSet}>
+            세트 끝
+          </button>
+        )}
         {view.paused ? (
           <button type="button" onClick={onResume}>
             다시 시작
