@@ -359,3 +359,10 @@ body {
 .form-note {
   margin: 4px 0;
 }
+.form-icon {
+  margin-right: 4px;
+}
+.form-error {
+  color: #ff8a80;
+  margin: 4px 0;
+}

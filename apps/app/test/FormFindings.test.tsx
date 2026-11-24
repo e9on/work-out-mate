@@ -149,4 +149,49 @@ describe('FormFindings', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '1번째 다시 보기' })[0]!);
     expect(onPlay).toHaveBeenCalledWith(setKey(SID, 0, 2), 1);
   });
+  it('저장이 실패하면 눌림을 되돌리고 안내를 보인다', async () => {
+    const store = await setup({ analyses: [analysis(0, { findings: [{ index: 4, kind: 'kneeIn', value: 1 }] })] });
+    vi.spyOn(store, 'putLabel').mockRejectedValue(new Error('idb'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
+    fireEvent.click(await screen.findByRole('button', { name: '맞아요' }));
+    expect(await screen.findByText('저장하지 못했어요')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '맞아요' })).toHaveAttribute('aria-pressed', 'false');
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('저장이 끝나기 전에 같은 반복의 두 지적을 연달아 눌러도 둘 다 남는다', async () => {
+    const store = await setup({
+      analyses: [analysis(0, { findings: [{ index: 4, kind: 'depth', value: 1 }, { index: 4, kind: 'heel', value: 1 }] })],
+    });
+    const real = store.putLabel.bind(store);
+    const put = vi.spyOn(store, 'putLabel').mockImplementation(async (l) => {
+      await new Promise((r) => setTimeout(r, 30));
+      return real(l);
+    });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
+    const agree = await screen.findAllByRole('button', { name: '맞아요' });
+    fireEvent.click(agree[0]!);
+    fireEvent.click(agree[1]!);
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(2));
+    const last = put.mock.calls[1]![0];
+    expect(last.verdicts).toHaveLength(2);
+    await waitFor(async () => expect((await store.listLabels(SID))[0]!.verdicts).toHaveLength(2));
+  });
+
+  it('세트 제목에 운동 이름·횟수·목표 달성, 줄 앞에 아이콘', async () => {
+    const store = await setup({
+      videos: [0, 1],
+      analyses: [
+        analysis(0, { findings: [{ index: 4, kind: 'kneeIn', value: 1 }], notes: [{ kind: 'fastDescent', avgDescentMs: 600 }] }),
+        analysis(1, { findings: [{ index: 4, kind: 'heel', value: 1 }] }),
+      ],
+    });
+    const hit = { ...log(0, reps), endReason: 'target' as const };
+    render(<FormFindings store={store} sessionId={SID} session={session([hit, log(1, reps)])} />);
+    const titles = (await screen.findAllByRole('heading', { level: 3 })).map((h) => h.textContent);
+    expect(titles).toEqual(['스쿼트 1세트  5회  ✓ 목표 달성', '스쿼트 2세트  5회']);
+    expect(screen.getAllByText('⚠')).toHaveLength(2);
+    expect(screen.getAllByText('ⓘ')).toHaveLength(1);
+  });
 });
