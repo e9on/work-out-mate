@@ -246,14 +246,8 @@ def summary(write: bool = True) -> dict:
     d = ec3d_src.safe_load(ec3d_root / "data_3D.pickle")
     mapping = ec3d_src.verify_mapping(ec3d_src.sequence_counts(np.asarray(d["labels"]).astype(str)))
     del d
-    # 본인 녹화는 녹화마다 읽어, 반복 수가 기대와 달라 실패한 녹화는 이유(개수만)를 기록하고 뺀다.
-    own, own_failed = [], {}
-    for name in list(own_src.LITE_FILES) + [own_src.VIDEO_FILE]:
-        try:
-            own += load_own(paths.PRIVATE_OWN, files=[name])
-        except ValueError as e:
-            own_failed[name] = str(e)
-    reps = load_ec3d(ec3d_root) + load_zenodo(zen_root) + own
+    # 본인 녹화: 기본 목록(R7 제외 반영). 목록 안 녹화가 실패하면 예외로 멈춘다(조용한 축소 금지).
+    reps = load_ec3d(ec3d_root) + load_zenodo(zen_root) + load_own(paths.PRIVATE_OWN)
     _, zen_dup = zen_src.scan(zen_root)
     sp = split(reps)
     res: dict = {
@@ -263,7 +257,7 @@ def summary(write: bool = True) -> dict:
         "zenodo_duplicates_removed": zen_dup,
         "zenodo_people": {k: sorted({r.subject for r in sp[k] if r.source == "zenodo"})
                           for k in ("train", "val")},
-        "own_failed": own_failed,
+        "own_excluded": {f: "제외(R7)" for f in sorted(own_src.EXCLUDED_FILES)},
         "too_short_reps": sum(1 for r in reps if len(r.seq) < 3),
         "splits": {},
     }

@@ -38,6 +38,10 @@ from wom_ml.sources import Rep, make_labels
 LITE_WH = (480.0, 640.0)
 LITE_FILES = {"diag45-12.json": 12, "diag45.json": 6, "side.json": 6, "front.json": 6}
 VIDEO_FILE = "rtm-litebox-1.0.json"
+# 컨트롤러 판단 R7: test_own에서 뺀다. 정면 녹화는 world 무릎 각도가 튀어(손이 골반을 가릴 때 무릎 점이 튐,
+# form-analysis 설계 10절) 145/152/130 규칙이 5회만 찾고, 평활·신호를 바꿔도 반복 경계를 믿을 수 없다.
+# 여기 없는 녹화가 반복 수 불일치로 실패하면 어디서든 예외로 멈춘다(조용히 빼지 않음).
+EXCLUDED_FILES = {"front.json"}
 VIDEO_BOTTOMS_S = [6.9, 9.5, 12, 14.4, 21.8, 24.3, 26.7, 29.2, 36.9, 40, 43.1, 46.1,
                    49.4, 51.6, 53.7, 55.6, 58.6, 60.8, 63, 65.2]
 VIDEO_HALF_WINDOW_MS = 800.0
@@ -154,10 +158,15 @@ def _video_reps(path: Path) -> list[Rep]:
     return out
 
 
+def default_files() -> list[str]:
+    """기본으로 읽는 녹화: 전체에서 EXCLUDED_FILES(R7)를 뺀 것."""
+    return [f for f in list(LITE_FILES) + [VIDEO_FILE] if f not in EXCLUDED_FILES]
+
+
 def load_own(private_dir: Path, files: list[str] | None = None) -> list[Rep]:
-    """본인 녹화 → Rep. files로 일부 녹화만 읽을 수 있다(기본: 전부). 반복 수가 기대와 다르면 ValueError."""
+    """본인 녹화 → Rep. 기본은 default_files()(R7 제외 반영). 반복 수가 기대와 다르면 ValueError."""
     private_dir = Path(private_dir)
-    files = list(LITE_FILES) + [VIDEO_FILE] if files is None else list(files)
+    files = default_files() if files is None else list(files)
     reps = []
     for name in files:
         if name in LITE_FILES:

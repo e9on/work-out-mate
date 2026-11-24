@@ -342,7 +342,8 @@ def test_find_reps_lite_rule():
 
 def test_load_own_groups_and_labels(tmp_path):
     write_own(tmp_path)
-    reps = own_src.load_own(tmp_path)
+    # 라벨 규칙 확인용으로 제외(R7) 녹화까지 명시해 읽는다
+    reps = own_src.load_own(tmp_path, files=list(own_src.LITE_FILES) + [own_src.VIDEO_FILE])
     assert all(r.source == "own" and r.exercise == "squat" for r in reps)
     vid = sorted([r for r in reps if r.meta["file"] == "rtm-litebox-1.0.json"], key=lambda r: r.meta["index"])
     assert [r.meta["index"] for r in vid] == list(range(1, 21))
@@ -400,3 +401,20 @@ def test_own_label_rules_direct():
     assert grp == "heel" and sum(lab.values()) == 0
     with pytest.raises(ValueError):
         own_src.video_label(21)
+
+
+def test_load_own_default_skips_excluded_recordings(tmp_path):
+    """R7: 기본 load_own은 제외 목록(front.json)을 건너뛴다 — 그 녹화의 반복 수가 틀려도 예외 없음."""
+    assert own_src.EXCLUDED_FILES == {"front.json"}
+    write_own(tmp_path, counts=(12, 6, 6, 5))  # front.json만 5회
+    reps = own_src.load_own(tmp_path)
+    assert "front.json" not in {r.meta["file"] for r in reps}
+    assert len(reps) == 20 + 12 + 6 + 6
+    assert set(own_src.default_files()) == {"diag45-12.json", "diag45.json", "side.json", "rtm-litebox-1.0.json"}
+
+
+def test_load_own_default_raises_on_non_excluded_failure(tmp_path):
+    """제외 목록 밖 녹화가 반복 수 불일치면 기본 호출에서도 예외(조용한 축소 금지)."""
+    write_own(tmp_path, counts=(12, 6, 5, 5))  # side.json 5회
+    with pytest.raises(ValueError, match="side.json"):
+        own_src.load_own(tmp_path)
