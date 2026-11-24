@@ -28,6 +28,7 @@ from functools import partial
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -92,6 +93,21 @@ def _missing_weights_message(path: Path) -> str:
             f"best_epoch.bin 을 받아 {DEFAULT_WEIGHTS} 즉 ml/weights/motionbert_lite.bin 으로 두기).")
 
 
+def _numpy_safe_globals() -> list:
+    """weights_only 로드에 더할 최소 numpy 전역.
+
+    업스트림 save_checkpoint(train.py)는 min_loss(np.mean 결과 = numpy.float64 스칼라)도 저장한다.
+    이 스칼라를 풀려면 `numpy._core.multiarray.scalar`(numpy 2.x 이름)와 `numpy.dtype`, 그리고 dtype 상태를
+    BUILD할 dtype 클래스가 필요하다(get_unsafe_globals_in_checkpoint와 실제 로드 오류로 확인, numpy 2.4).
+    min_loss는 평가 오차(np.mean)라 float32(torch 출력 기반)일 수도 float64일 수도 있어 두 dtype 클래스만 허용.
+    공개 가중치는 numpy 1.x 시절에 저장됐으므로 옛 이름 `numpy.core.multiarray.scalar`도 같은 함수로 연결한다.
+    그 밖의 전역은 허용하지 않는다.
+    """
+    scalar = np._core.multiarray.scalar
+    return [scalar, (scalar, "numpy.core.multiarray.scalar"), np.dtype,
+            np.dtypes.Float32DType, np.dtypes.Float64DType]
+
+
 def load_backbone_weights(backbone: nn.Module, path: Path) -> dict:
     """체크포인트를 backbone에 넣는다. 반환 {"missing": [...], "unexpected": [...]}.
 
@@ -100,7 +116,9 @@ def load_backbone_weights(backbone: nn.Module, path: Path) -> dict:
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(_missing_weights_message(path))
-    ck = torch.load(path, map_location="cpu", weights_only=True)  # 신뢰할 수 없는 외부 파일
+    # 신뢰할 수 없는 외부 파일: weights_only=True 유지, numpy 스칼라에 필요한 최소 전역만 로드하는 동안 허용
+    with torch.serialization.safe_globals(_numpy_safe_globals()):
+        ck = torch.load(path, map_location="cpu", weights_only=True)
     sd = ck
     if isinstance(ck, dict):
         for k in ("model_pos", "model", "state_dict"):
@@ -176,6 +194,13 @@ class MotionBertClassifier(nn.Module):
             ratio = BACKBONE_LR_RATIO if self.freeze == "full" else 1.0
             groups.append({"params": body, "lr": lr * ratio})
         return groups
+
+    def train(self, mode: bool = True):
+        """probe면 몸통은 늘 eval(고정 특징이 dropout 등으로 흔들리지 않게). 그 밖은 기본 동작."""
+        super().train(mode)
+        if self.freeze == "probe":
+            self.backbone.eval()
+        return self
 
     # ------------------------------------------------------------ 계산
     def features(self, x: torch.Tensor) -> torch.Tensor:

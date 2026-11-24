@@ -11,6 +11,10 @@ from wom_ml import paths
 from wom_ml.models.motionbert import LITE_CFG, MotionBertClassifier, build_backbone
 from wom_ml.sources import HEAD_LABELS
 
+# 이 PC(14스레드)에서 CPU 스레드를 다 쓰면 몇 테스트 뒤부터 같은 연산이 수십 배 느려졌다(파일 전체 95초 → 4스레드로 9초).
+# 스레드 과다 사용으로 보고 CPU 스레드를 4개로 제한한다(계산 결과에는 영향 없음).
+torch.set_num_threads(min(4, torch.get_num_threads()))
+
 HEADS = {ex: len(c) for ex, c in HEAD_LABELS.items()}
 T = 64
 REAL_WEIGHTS = paths.WEIGHTS / "motionbert_lite.bin"
@@ -167,3 +171,87 @@ def test_works_with_train_loop_param_groups(tmp_path):
     info = tr.fit(m, (X, Y, meta), (X, Y, [{**d, "subject": "p02"} for d in meta]), cfg, 0, tmp_path)
     assert info["epochs_run"] == 1
     assert not torch.equal(before, m.backbone.joints_embed.weight.detach().cpu())
+
+
+def _upstream_style_checkpoint(path, backbone, legacy_numpy_names=False, loss_dtype="float64"):
+    """업스트림 train.py save_checkpoint와 같은 형식:
+    {'epoch', 'lr', 'optimizer': state_dict, 'model_pos': DataParallel state_dict, 'min_loss': np.float64}.
+
+    legacy_numpy_names=True면 numpy 1.x로 저장한 파일처럼 numpy 스칼라 전역 이름을
+    'numpy.core.multiarray.scalar'로 쓴다(공개 가중치는 numpy 1.x 시절에 저장됐다).
+    """
+    import pickle
+    import types
+
+    import numpy as np
+
+    sd = {"module." + k: v.clone() for k, v in backbone.state_dict().items()}
+    p = torch.nn.Parameter(torch.zeros(3))
+    opt = torch.optim.AdamW([p], lr=5e-4)
+    p.grad = torch.ones(3)
+    opt.step()  # 상태(exp_avg 등)가 찬 옵티마이저
+    obj = {"epoch": 61, "lr": 0.0005 * 0.99 ** 60, "optimizer": opt.state_dict(), "model_pos": sd,
+           "min_loss": np.mean(np.array([1.0, 2.0], dtype=loss_dtype))}
+    assert type(obj["min_loss"]) is np.dtype(loss_dtype).type
+    if not legacy_numpy_names:
+        torch.save(obj, path)
+        return sd
+    scalar = np._core.multiarray.scalar
+
+    class LegacyPickler(pickle._Pickler):
+        def save_global(self, o, name=None):
+            if o is scalar:
+                self.write(pickle.GLOBAL + b"numpy.core.multiarray\nscalar\n")
+                self.memoize(o)
+                return
+            super().save_global(o, name)
+
+    mod = types.ModuleType("legacy_pickle")
+    mod.Pickler = LegacyPickler
+    torch.save(obj, path, pickle_module=mod)
+    return sd
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("loss_dtype", ["float64", "float32"])
+def test_loader_reads_upstream_checkpoint_format_with_numpy_scalar(tmp_path, legacy, loss_dtype):
+    torch.manual_seed(2)
+    ck = tmp_path / "best_epoch.bin"
+    sd = _upstream_style_checkpoint(ck, build_backbone(), legacy_numpy_names=legacy, loss_dtype=loss_dtype)
+    m = MotionBertClassifier(HEADS, weights=ck, freeze="probe")
+    assert m.load_report["missing"] == []
+    assert set(m.load_report["unexpected"]) == {"head.weight", "head.bias"}
+    for k, v in m.backbone.state_dict().items():
+        assert torch.equal(v, sd["module." + k]), k
+    # numpy 허용은 로드하는 동안만(전역 허용 목록을 바꾸지 않음)
+    import numpy as np
+
+    after = torch.serialization.get_safe_globals()
+    for g in (np._core.multiarray.scalar, np.dtype, np.dtypes.Float64DType, np.dtypes.Float32DType):
+        assert g not in after and all(not (isinstance(a, tuple) and a[0] is g) for a in after)
+
+
+class _NotAllowed:
+    """허용 목록에 없는 임의 클래스(weights_only가 거부해야 함)."""
+
+
+def test_loader_still_rejects_arbitrary_globals(tmp_path):
+    """weights_only=True 유지: 허용하지 않은 전역(임의 객체)은 거부."""
+    ck = tmp_path / "evil.bin"
+    torch.save({"model_pos": {}, "x": _NotAllowed()}, ck)
+    with pytest.raises(Exception) as e:
+        MotionBertClassifier(HEADS, weights=ck, freeze="probe")
+    assert "weights_only" in str(e.value) or "Unsupported global" in str(e.value)
+
+
+def test_probe_train_keeps_backbone_eval():
+    m = MotionBertClassifier(HEADS, weights=None, freeze="probe")
+    m.train()
+    assert m.training and all(h.training for h in m.heads.values())
+    assert not m.backbone.training and all(not mod.training for mod in m.backbone.modules())
+    m.eval()
+    assert not m.heads.training
+    for mode in ("partial", "full"):
+        mm = MotionBertClassifier(HEADS, weights=None, freeze=mode)
+        mm.train()
+        assert mm.backbone.training
