@@ -96,7 +96,7 @@ export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHom
 
   let content = null;
   if (view && engine) {
-    if (view.ended) content = <Summary session={view.ended} onHome={onHome} />;
+    if (view.ended) content = <Summary session={view.ended} onHome={onHome} mediaStore={mediaStore} analysisQueue={analysisQueue} />;
     else if (view.cameraError) content = <CameraErrorView kind={view.cameraError} onRetry={start} onHome={onHome} />;
     else if (view.phase === 'rest')
       content = <Rest view={view} onSkipRest={() => engine.skipRest()} onPause={() => engine.pause()} onResume={() => engine.resume()} />;

@@ -2,15 +2,22 @@ import { useEffect, useState } from 'react';
 import type { WorkoutSession } from '@wom/core';
 import type { Storage } from '../ports/storage';
 import { formatDateTime } from './History';
+import type { AnalysisQueue } from '../form/analysisQueue';
+import type { SetKey } from '../form/types';
+import type { MediaStore } from '../ports/mediaStore';
+import { FormFindings } from './FormFindings';
 import { SetTable } from './SetTable';
 
 export type SessionDetailProps = {
   storage: Storage;
   sessionId: string;
   onBack: () => void;
+  mediaStore?: MediaStore;
+  analysisQueue?: AnalysisQueue;
+  onPlay?: (setKey: SetKey, index: number) => void;
 };
 
-export function SessionDetail({ storage, sessionId, onBack }: SessionDetailProps) {
+export function SessionDetail({ storage, sessionId, onBack, mediaStore, analysisQueue, onPlay }: SessionDetailProps) {
   // undefined: 읽는 중, null: 없음
   const [session, setSession] = useState<WorkoutSession | null | undefined>(undefined);
 

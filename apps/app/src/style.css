@@ -327,3 +327,35 @@ body {
   stroke-width: 2;
   stroke-dasharray: 6 6;
 }
+.form-findings {
+  margin: 16px 0;
+  text-align: left;
+}
+.form-title {
+  font-size: 1.1rem;
+  margin: 0 0 8px;
+}
+.form-set-title {
+  font-size: 1rem;
+  margin: 12px 0 4px;
+}
+.form-finding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.form-finding-text {
+  flex: 1 1 100%;
+}
+.form-vote[aria-pressed='true'] {
+  background: #78dcff;
+  color: #000;
+}
+.form-progress,
+.form-none,
+.form-reason,
+.form-note {
+  margin: 4px 0;
+}

@@ -59,7 +59,7 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
     case 'history':
       return <History storage={storage} onOpen={(sessionId) => setScreen({ kind: 'detail', sessionId })} onBack={home} />;
     case 'detail':
-      return <SessionDetail storage={storage} sessionId={screen.sessionId} onBack={() => setScreen({ kind: 'history' })} />;
+      return <SessionDetail storage={storage} sessionId={screen.sessionId} mediaStore={mediaStore} analysisQueue={analysisQueue} onBack={() => setScreen({ kind: 'history' })} />;
     case 'workout':
       return <WorkoutFlow key={screen.routine.id} routine={screen.routine} storage={storage} mediaStore={mediaStore} analysisQueue={analysisQueue} onHome={home} deps={workoutDeps} />;
     default:
