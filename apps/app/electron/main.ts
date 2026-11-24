@@ -173,6 +173,8 @@ type SelftestResult = {
   probeDetails: string[];
   wakeLock: boolean;
   wakeLockDetail: string;
+  rtmpose: boolean;
+  rtmposeDetail: string;
 };
 
 /** 렌더러가 보낸 결과와 main이 본 네트워크 기록을 합쳐 판정한다. 실패 사유 목록을 돌려준다(빈 배열이면 통과). */
@@ -183,6 +185,7 @@ function judge(r: SelftestResult): string[] {
   if (r.probesRejected !== true) fails.push(`렌더러의 외부 요청 중 성공한 것이 있음: ${JSON.stringify(r.probeDetails)}`);
   if (!blocked.some((u) => u.includes(PROBE_MARK))) fails.push(`main 차단 목록에 점검용 외부 요청(${PROBE_MARK})이 없음`);
   if (r.wakeLock !== true) fails.push(`화면 wake lock 실패: ${r.wakeLockDetail}`);
+  if (r.rtmpose !== true) fails.push(`RTMPose 세션 생성 실패: ${r.rtmposeDetail}`);
   if (sentExternal.length !== 0) fails.push(`실제로 나간 외부 요청 ${sentExternal.length}건: ${JSON.stringify(sentExternal)}`);
   return fails;
 }
@@ -204,6 +207,7 @@ function finishSelftest(raw: string): void {
   log(`[selftest] 랜드마커: ${r.landmarker ? '성공' : '실패'} (${r.landmarkerDetail})`);
   log(`[selftest] 렌더러 외부 요청: ${JSON.stringify(r.probeDetails)}`);
   log(`[selftest] 화면 wake lock: ${r.wakeLock ? '성공' : '실패'} (${r.wakeLockDetail})`);
+  log(`[selftest] RTMPose 세션: ${r.rtmpose ? '성공' : '실패'} (${r.rtmposeDetail})`);
   log(`[selftest] main 차단 ${blocked.length}건: ${JSON.stringify(blocked)}`);
   log(`[selftest] 실제로 나간 외부 요청 ${sentExternal.length}건`);
   const fails = judge(r);
