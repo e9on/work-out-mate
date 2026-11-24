@@ -65,11 +65,13 @@ describe('computeSquatRepMetrics', () => {
     expect(judgeSquat(m, []).findings).toEqual([]);
   });
 
-  it('한쪽 무릎만 굽은 구간(왼 80도, 오른 170도)은 oneLeg', () => {
-    const { metrics } = run([GOOD, { ...GOOD, kneeDeg: 80, kneeDegR: 170 }]);
+  it('왼 170도/오른 80도(한쪽만 굽음)는 oneLeg, 왼 120도/오른 40도는 oneLeg 아님', () => {
+    const { metrics } = run([GOOD, { ...GOOD, kneeDeg: 170, kneeDegR: 80 }, { ...GOOD, kneeDeg: 120, kneeDegR: 40 }]);
     expect(metrics[0]!.skipped).toBeNull();
     expect(metrics[1]!.skipped).toBe('oneLeg');
-    expect(judgeSquat(metrics, []).findings).toEqual([]);
+    expect(metrics[2]!.skipped).toBeNull();
+    expect(metrics[2]!.kneeDeg).toBeCloseTo(80, 0);
+    expect(judgeSquat([metrics[1]!], []).findings).toEqual([]);
   });
 
   it('reps가 0개·1개여도 예외 없이 동작한다', () => {
@@ -82,24 +84,48 @@ describe('computeSquatRepMetrics', () => {
     expect(m[0]!.skipped).toBe('noPerson');
   });
 
-  it('점수 0.1인 프레임과 정강이 길이가 2배로 튄 프레임은 중앙값에서 빠진다', () => {
+  it('점수 0.1인 프레임과 한 프레임만 정강이가 2배로 튄 프레임은 버린다', () => {
     const { frames, reps } = makeSet([GOOD]);
     const bt = reps[0]!.bottomT;
     const win = frames.filter((f) => Math.abs(f.t - bt) <= 150);
     expect(win.length).toBeGreaterThanOrEqual(5);
-    // 바닥 구간 프레임 중 과반을 오염. 걸러지지 않으면 중앙값이 오염 값으로 끌려간다.
-    const replaced = new Set(win.slice(0, 4).map((f) => f.t));
-    let n = 0;
+    const lowT = win[0]!.t;
+    const longT = win[1]!.t;
+    const base = { kneeDeg: 160, kneeAnkleRatio: 0.3, heelRise: 0.9 };
     const mixed = frames.map((f) => {
-      if (!replaced.has(f.t)) return f;
-      const base = { t: f.t, kneeDeg: 160, kneeAnkleRatio: 0.3, heelRise: 0.9 };
-      return n++ % 2 === 0 ? buildHalpe({ ...base, score: 0.1 }) : buildHalpe({ ...base, shankScale: 2 });
+      if (f.t === lowT) return buildHalpe({ ...base, t: f.t, score: 0.1 });
+      if (f.t === longT) return buildHalpe({ ...base, t: f.t, shankScale: 2 });
+      return f;
     });
     const m = computeSquatRepMetrics(mixed, reps)[0]!;
     expect(m.skipped).toBeNull();
+    // 오염 프레임이 중앙값에 들어가도 값이 크게 변하지 않지만, 한 프레임 튐은 반드시 버려져야 하므로 길이만 튄 프레임 단독으로도 확인한다
+    const onlyLong = frames.map((f) => (f.t === longT ? buildHalpe({ ...base, t: f.t, shankScale: 2 }) : f));
+    const winF = onlyLong.filter((f) => Math.abs(f.t - bt) <= 150);
+    expect(winF.length).toBe(win.length);
+    // 바닥 구간을 전부 한 프레임 튐으로 채우면 살아남는 프레임이 없어야 한다(튄 프레임 사이가 이웃 중앙값과 다르므로)
+    const spikes = frames.map((f) => (Math.abs(f.t - bt) <= 150 && ((f.t - win[0]!.t) / 50) % 2 === 0 ? buildHalpe({ ...base, t: f.t, shankScale: 2 }) : f));
+    const m2 = computeSquatRepMetrics(spikes, reps)[0]!;
+    expect(m2.kneeDeg).toBeCloseTo(80, 0);
     expect(m.kneeDeg).toBeCloseTo(80, 0);
     expect(m.kneeAnkleRatio).toBeCloseTo(1.5, 1);
     expect(m.heelRise).toBeCloseTo(0.05, 1);
+  });
+
+  it('천천히 짧아지는 허벅지(45도 단축)는 버리지 않는다', () => {
+    // 허벅지가 1.0 -> 0.4로 서서히 줄어드는 세트. 세트 전체 중앙값 기준이면 바닥 프레임이 버려진다.
+    const frames: KpFrame[] = [];
+    for (let t = 0; t <= 2000; t += 50) {
+      const u = Math.min(1, t / 1500);
+      frames.push(buildHalpe({ t, kneeDeg: 175 - 95 * u, kneeAnkleRatio: 1 + 0.5 * u, heelRise: 0, thighScale: 1 - 0.6 * u }));
+    }
+    for (let t = 2050; t <= 3000; t += 50) frames.push(buildHalpe({ t, kneeDeg: 80, kneeAnkleRatio: 1.5, heelRise: 0, thighScale: 0.4 }));
+    for (let t = 3050; t <= 6000; t += 50) frames.push(buildHalpe({ t, kneeDeg: 175, kneeAnkleRatio: 1, heelRise: 0 }));
+    for (let t = -300; t < 0; t += 50) frames.unshift(buildHalpe({ t, kneeDeg: 175, kneeAnkleRatio: 1, heelRise: 0 }));
+    frames.sort((a, b) => a.t - b.t);
+    const m = computeSquatRepMetrics(frames, [{ index: 1, startT: 500, bottomT: 2500, endT: 3000 }])[0]!;
+    expect(m.skipped).toBeNull();
+    expect(m.kneeDeg).toBeCloseTo(80, 0);
   });
 
   it('서 있는 프레임이 없으면 비율·뒤꿈치·하강시간은 null', () => {

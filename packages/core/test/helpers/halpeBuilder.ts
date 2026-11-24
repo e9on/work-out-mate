@@ -18,6 +18,8 @@ export type HalpeOpts = {
   score?: number;
   /** 정강이 길이 배수(이상치 시험용) */
   shankScale?: number;
+  /** 허벅지 길이 배수(45도 시점 단축 시험용) */
+  thighScale?: number;
 };
 
 /** 단순 정면 투영 관절점(26개 중 쓰는 10점만 의미 있음). */
@@ -48,7 +50,7 @@ export function buildHalpe(o: HalpeOpts): KpFrame {
       side === -1
         ? [HALPE.L_HIP, HALPE.L_KNEE, HALPE.L_ANKLE, HALPE.L_BIG_TOE, HALPE.L_HEEL]
         : [HALPE.R_HIP, HALPE.R_KNEE, HALPE.R_ANKLE, HALPE.R_BIG_TOE, HALPE.R_HEEL];
-    kps[hip] = { x: kx + hx * THIGH, y: ky + hy * THIGH, score };
+    kps[hip] = { x: kx + hx * THIGH * (o.thighScale ?? 1), y: ky + hy * THIGH * (o.thighScale ?? 1), score };
     kps[knee] = { x: kx, y: ky, score };
     kps[ank] = { x: ankle.x, y: ankle.y, score };
     kps[toe] = { x: ankle.x, y: toeY, score };

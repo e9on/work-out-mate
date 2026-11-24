@@ -19,6 +19,9 @@ export const SQUAT_RULES = {
   standingKneeDeg: 160,
   descentStartDropDeg: 15,
   segmentOutlierRatio: 0.3,
+  segmentNeighborMs: 200,
+  oneLegStraightDeg: 150,
+  oneLegBentDeg: 120,
   minScore: 0.3,
 } as const;
 
@@ -34,8 +37,6 @@ export type SquatRepMetrics = {
 export type FormFinding = { index: number; kind: FindingKind; value: number };
 export type SetNote = { kind: 'fastDescent'; avgDescentMs: number };
 export type SquatJudgement = { findings: FormFinding[]; notes: SetNote[]; uncertain: number[] };
-
-const ONE_LEG_DIFF_DEG = 40;
 
 function median(xs: number[]): number | null {
   if (xs.length === 0) return null;
@@ -92,19 +93,26 @@ type FrameInfo = {
 
 function analyzeFrames(frames: KpFrame[]): FrameInfo[] {
   const raws = frames.map((f) => (f.kps ? [legRaw(f.kps, LEGS[0]!), legRaw(f.kps, LEGS[1]!)] : null));
-  // 다리별 허벅지·정강이 길이의 세트 중앙값
-  const med = LEGS.map((_, li) => ({
-    thigh: median(raws.flatMap((r) => (r?.[li] ? [r[li]!.thigh] : []))),
-    shank: median(raws.flatMap((r) => (r?.[li] ? [r[li]!.shank] : []))),
-  }));
+  // 길이 이상치: 시간상 이웃 프레임(t ±segmentNeighborMs, 자기 제외)의 중앙값과 비교. 이웃이 없으면 버리지 않는다.
   const ratio = SQUAT_RULES.segmentOutlierRatio;
-  const ok = (v: number, m: number | null) => m !== null && m > 0 && Math.abs(v - m) / m <= ratio;
+  const nb = SQUAT_RULES.segmentNeighborMs;
+  const off = (v: number, m: number | null) => m !== null && m > 0 && Math.abs(v - m) / m > ratio;
   const out: FrameInfo[] = [];
   frames.forEach((f, i) => {
     const r = raws[i];
     if (!f.kps || !r || !r[0] || !r[1]) return;
     for (let li = 0; li < 2; li++) {
-      if (!ok(r[li]!.thigh, med[li]!.thigh) || !ok(r[li]!.shank, med[li]!.shank)) return;
+      const th: number[] = [];
+      const sh: number[] = [];
+      for (let j = i - 1; j >= 0 && f.t - frames[j]!.t <= nb; j--) {
+        const q = raws[j]?.[li];
+        if (q) { th.push(q.thigh); sh.push(q.shank); }
+      }
+      for (let j = i + 1; j < frames.length && frames[j]!.t - f.t <= nb; j++) {
+        const q = raws[j]?.[li];
+        if (q) { th.push(q.thigh); sh.push(q.shank); }
+      }
+      if (off(r[li]!.thigh, median(th)) || off(r[li]!.shank, median(sh))) return;
     }
     const k = f.kps;
     // 뒤꿈치: 엄지발가락·뒤꿈치 점수가 충분한 다리만 평균
@@ -144,7 +152,8 @@ export function computeSquatRepMetrics(frames: KpFrame[], reps: RepTiming[]): Sq
 
     const degL = median(win.map((f) => f.legDeg[0]))!;
     const degR = median(win.map((f) => f.legDeg[1]))!;
-    if (Math.abs(degL - degR) > ONE_LEG_DIFF_DEG) {
+    const { oneLegStraightDeg: st, oneLegBentDeg: bent } = SQUAT_RULES;
+    if ((degL > st && degR < bent) || (degR > st && degL < bent)) {
       return { ...base, kneeDeg: null, kneeAnkleRatio: null, heelRise: null, descentMs: null, skipped: 'oneLeg' };
     }
     const kneeDeg = median(win.map((f) => f.kneeDeg))!;
