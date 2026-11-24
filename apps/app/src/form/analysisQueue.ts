@@ -143,21 +143,25 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
   });
 
   /** 같은 세션의 앞선 분석 + 최근 세션의 스쿼트 분석 metrics */
-  const gatherHistory = async (key: SetKey, session: WorkoutSession): Promise<SquatRepMetrics[]> => {
+  const gatherHistory = async (key: SetKey, session: WorkoutSession, cur: { exerciseIndex: number; setIndex: number }): Promise<SquatRepMetrics[]> => {
     const out: SquatRepMetrics[] = [];
-    const take = async (s: WorkoutSession) => {
-      const squatKeys = new Set(s.sets.filter((l) => l.exercise === 'squat').map((l) => `${s.id}/${l.exerciseIndex}/${l.setIndex}`));
+    // 같은 세션은 이번 세트보다 앞선 세트만, 다른 세션은 먼저 시작한 세션만 본다
+    const before = (l: { exerciseIndex: number; setIndex: number }) => l.exerciseIndex < cur.exerciseIndex || (l.exerciseIndex === cur.exerciseIndex && l.setIndex < cur.setIndex);
+    const take = async (s: WorkoutSession, same: boolean) => {
+      const squatKeys = new Set(
+        s.sets.filter((l) => l.exercise === 'squat' && (!same || before(l))).map((l) => `${s.id}/${l.exerciseIndex}/${l.setIndex}`),
+      );
       for (const a of await store.listAnalyses(s.id)) {
         if (a.key !== key && a.status === 'done' && squatKeys.has(a.key)) out.push(...a.metrics);
       }
     };
     try {
-      await take(session);
+      await take(session, true);
       const others = (await storage.listSessions())
-        .filter((s) => s.id !== session.id)
+        .filter((s) => s.id !== session.id && s.startedAt < session.startedAt)
         .sort((a, b) => b.startedAt - a.startedAt)
         .slice(0, RECENT_SESSIONS);
-      for (const s of others) await take(s);
+      for (const s of others) await take(s, false);
     } catch (e) {
       warn('이전 분석 기록 읽기 실패', e);
     }
@@ -169,6 +173,7 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     const clip = await reader.open(video.blob);
     const frames: KpFrame[] = [];
     try {
+      if (!(Number.isFinite(clip.durationMs) && clip.durationMs > 0)) throw new Error('영상 길이를 알 수 없어요');
       const step = 1000 / FPS;
       for (let i = 0; i * step <= clip.durationMs; i++) {
         await waitNotBusy();
@@ -208,13 +213,15 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     let a: SetAnalysis;
     try {
       const model = await getModel();
+      await waitNotBusy(); // 모델을 불러오는 동안 다음 세트가 시작됐을 수 있다
+      if (disposed) return 'done';
       const frames = await readFrames(video, model);
       if (disposed) return 'done';
       if (frames.every((f) => f.kps === null)) {
         a = failed(key, video.sessionId, 'noPerson');
       } else {
         const metrics = computeSquatRepMetrics(frames, log.reps);
-        const judged = judgeSquat(metrics, await gatherHistory(key, session));
+        const judged = judgeSquat(metrics, await gatherHistory(key, session, log));
         a = {
           key,
           sessionId: video.sessionId,

@@ -52,8 +52,13 @@ export function createVideoFrameReader(): VideoFrameReader {
         close();
         throw e;
       }
+      // 길이를 모르는 영상으로 분석하면 지적 없음처럼 보이는 결과가 저장되므로 오류로 처리한다
+      if (!Number.isFinite(video.duration) || video.duration <= 0) {
+        close();
+        throw new Error('영상 길이를 알 수 없어요');
+      }
       return {
-        durationMs: Number.isFinite(video.duration) ? video.duration * 1000 : 0,
+        durationMs: video.duration * 1000,
         width: video.videoWidth,
         height: video.videoHeight,
         async frameAt(ms) {

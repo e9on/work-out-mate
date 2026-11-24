@@ -387,6 +387,89 @@ describe('분석 대기열', () => {
     expect(a.findings.some((f) => f.kind === 'kneeInRelative')).toBe(true);
   });
 
+  it('영상 길이가 0이면 done이 아니라 failed·error로 저장한다', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { store, storage, model, queue } = await setup({ reader: fakeReader({ durationMs: 0 }) });
+    await storage.saveSession(session('s1', [log(0, 0)]));
+    await store.putVideo(video('s1', 0, 0));
+    queue.enqueue(setKey('s1', 0, 0));
+    expect(await analysisOf(store, setKey('s1', 0, 0))).toMatchObject({ status: 'failed', reason: 'error' });
+    expect(model.calls).toHaveLength(0);
+  });
+
+  it('모델을 불러오는 중에 busy가 되면 풀릴 때까지 estimate를 부르지 않는다', async () => {
+    const store = createMemoryMediaStore();
+    const storage = createMemoryStorage();
+    const model = fakeModel();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const factory = vi.fn(async () => {
+      await gate;
+      return model as FormPoseModel;
+    });
+    const queue = createAnalysisQueue({ store, storage, model: factory, reader: fakeReader(), now: () => 1, retryDelayMs: 0 });
+    queues.push(queue);
+    await storage.saveSession(session('s1', [log(0, 0)]));
+    await store.putVideo(video('s1', 0, 0));
+    queue.enqueue(setKey('s1', 0, 0));
+    await vi.waitFor(() => expect(factory).toHaveBeenCalled());
+    queue.setBusy(true);
+    release();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(model.calls).toHaveLength(0);
+    queue.setBusy(false);
+    expect((await analysisOf(store, setKey('s1', 0, 0))).status).toBe('done');
+  });
+
+  const doneWith = (key: string, sessionId: string, metrics: unknown[]) => ({
+    key,
+    sessionId,
+    status: 'done' as const,
+    reason: null,
+    metrics: metrics as never,
+    findings: [],
+    notes: [],
+    uncertain: [],
+    frames: [],
+    model: 'rtmpose-m-halpe26' as const,
+    analyzedAt: 1,
+  });
+  const peers = (n: number) => Array.from({ length: n }, (_, i) => ({ index: i + 1, bottomT: i, kneeDeg: 80, kneeAnkleRatio: 1.5, heelRise: 0.05, descentMs: 1500, skipped: null }));
+  const lowRatioModel = () =>
+    fakeModel({ kps: (ms) => buildHalpe({ t: ms, kneeDeg: ms >= 600 && ms <= 1400 ? 80 : 175, kneeAnkleRatio: ms >= 600 && ms <= 1400 ? 1.2 : 1, heelRise: 0.05 }).kps! });
+
+  it('history에 같은 세션의 뒤 세트 분석은 넣지 않는다', async () => {
+    const { store, storage, queue } = await setup({ model: lowRatioModel() });
+    await storage.saveSession(session('s1', [log(0, 0), log(0, 1)]));
+    await store.putAnalysis(doneWith(setKey('s1', 0, 1), 's1', peers(5))); // 뒤 세트
+    await store.putVideo(video('s1', 0, 0));
+    queue.enqueue(setKey('s1', 0, 0));
+    const a = await analysisOf(store, setKey('s1', 0, 0));
+    expect(a.findings.some((f) => f.kind === 'kneeInRelative')).toBe(false);
+  });
+
+  it('history에 이번 세션보다 늦게 시작한 세션의 분석은 넣지 않고, 먼저 시작한 세션은 넣는다', async () => {
+    const { store, storage, queue } = await setup({ model: lowRatioModel() });
+    await storage.saveSession(session('s1', [log(0, 0)]));
+    await storage.saveSession({ ...session('late', [log(0, 0)]), startedAt: STARTED + 1000 });
+    await storage.saveSession({ ...session('early', [log(0, 0)]), startedAt: STARTED - 1000 });
+    await store.putAnalysis(doneWith(setKey('late', 0, 0), 'late', peers(5)));
+    await store.putVideo(video('s1', 0, 0));
+    queue.enqueue(setKey('s1', 0, 0));
+    expect((await analysisOf(store, setKey('s1', 0, 0))).findings.some((f) => f.kind === 'kneeInRelative')).toBe(false);
+    await store.putAnalysis(doneWith(setKey('early', 0, 0), 'early', peers(5)));
+    await store.deleteVideo(setKey('s1', 0, 0));
+    await store.putVideo(video('s1', 0, 0));
+    queues.push(queue);
+    const q2 = createAnalysisQueue({ store, storage, model: async () => lowRatioModel(), reader: fakeReader(), now: () => 2, retryDelayMs: 0 });
+    queues.push(q2);
+    q2.enqueue(setKey('s1', 0, 0));
+    await vi.waitFor(async () => expect((await store.getAnalysis(setKey('s1', 0, 0)))!.analyzedAt).toBe(2));
+    expect((await store.getAnalysis(setKey('s1', 0, 0)))!.findings.some((f) => f.kind === 'kneeInRelative')).toBe(true);
+  });
+
   it('dispose하면 모델을 정리하고 더 분석하지 않는다', async () => {
     const { store, storage, model, queue } = await setup();
     await storage.saveSession(session('s1', [log(0, 0), log(0, 1)]));
