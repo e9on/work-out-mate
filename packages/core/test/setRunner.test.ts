@@ -138,6 +138,7 @@ describe('SetRunner: 스쿼트(보정 → 카운트다운 → 운동)', () => {
     for (const ev of r.stop(c.t, 'button')) out.push({ t: c.t, ev });
     const res = finishedOf(out)!.result;
     expect(res.count).toBeLessThan(3);
+    expect(res.count).toBeGreaterThan(0);
     const bottoms = res.reps!.map((x) => x.bottomSignal!);
     expect(bottoms).toHaveLength(res.count);
     [90, 80].slice(0, res.count).forEach((v, i) => expect(Math.abs(bottoms[i]! - v)).toBeLessThan(2));

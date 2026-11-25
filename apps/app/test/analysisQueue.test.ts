@@ -87,7 +87,7 @@ function video(sessionId: string, exerciseIndex: number, setIndex: number, boxes
   };
 }
 
-function log(exerciseIndex: number, setIndex: number, withReps = true): SetLog {
+function log(exerciseIndex: number, setIndex: number, withReps = true, bottomSignal?: number): SetLog {
   return {
     exercise: 'squat',
     target: { kind: 'reps', reps: 1 },
@@ -97,7 +97,7 @@ function log(exerciseIndex: number, setIndex: number, withReps = true): SetLog {
     startT: STARTED,
     endT: STARTED + DURATION,
     endReason: 'button',
-    ...(withReps ? { reps: [{ index: 1, startT: STARTED + 200, bottomT: STARTED + 1000, endT: STARTED + 1800 }] } : {}),
+    ...(withReps ? { reps: [{ index: 1, startT: STARTED + 200, bottomT: STARTED + 1000, endT: STARTED + 1800, ...(bottomSignal !== undefined ? { bottomSignal } : {}) }] } : {}),
     exerciseIndex,
     setIndex,
     restTakenMs: null,
@@ -129,7 +129,7 @@ const analysisOf = (store: MediaStore, key: string) => vi.waitFor(async () => (a
 describe('분석 대기열', () => {
   it('enqueue하면 15fps 시각마다 estimate를 부르고 SetAnalysis(done)와 findings를 저장한다', async () => {
     const { store, storage, reader, model, queue } = await setup();
-    await storage.saveSession(session('s1', [log(0, 0)]));
+    await storage.saveSession(session('s1', [log(0, 0, true, 95)]));
     await store.putVideo(video('s1', 0, 0));
     const progress = vi.fn();
     queue.onProgress(progress);
@@ -153,6 +153,8 @@ describe('분석 대기열', () => {
     expect(a.metrics[0]!.skipped).toBeNull();
     // 깊이는 이제 반복별 지적이 아니라 세트 조언(notes)으로만 낸다
     expect(a.findings.some((f) => f.kind === 'depth')).toBe(false);
+    // 3D 최저점(95°)이 기준(83°)보다 높은 반복 1회 → 끝까지 이어져 shallow 조언이 저장된다
+    expect(a.notes).toContainEqual({ kind: 'shallow', count: 1, total: 1 });
     // 대기열에 넣을 때 한 번(분석 중 표시), 저장 뒤 한 번
     await vi.waitFor(() => expect(progress).toHaveBeenCalledTimes(2));
     expect(progress).toHaveBeenCalledWith('s1');

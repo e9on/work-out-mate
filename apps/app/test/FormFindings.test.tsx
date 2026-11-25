@@ -262,6 +262,14 @@ describe('FormFindings', () => {
     expect(screen.queryByText('자세 지적 없음')).toBeNull();
   });
 
+  it('판정한 반복이 없어도 깊이 조언(ⓘ)은 사유 아래에 보인다', async () => {
+    const store = await setup({ analyses: [analysis(0, { metrics: [m(1, 'noPerson')], notes: [{ kind: 'shallow', count: 1, total: 1 }] })] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
+    expect(await screen.findByText('사람이 화면에 보이지 않아 분석하지 못했어요')).toBeInTheDocument();
+    expect(screen.getByText(/이번 세트는 1회 중 1회를 덜 앉았어요/)).toBeInTheDocument();
+    expect(screen.getAllByText('ⓘ')).toHaveLength(1);
+  });
+
   it('일부 반복만 판정했으면 "n회는 판정하지 못했어요" 한 줄을 더한다', async () => {
     const store = await setup({ analyses: [analysis(0, { metrics: [m(1, null), m(2, 'noPerson'), m(3, 'oneLeg')] })] });
     render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);

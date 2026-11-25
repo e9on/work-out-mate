@@ -26,7 +26,6 @@ for (const c of CASES) {
       const valleys = res.reps.map((r) => r.valley);
       const over = valleys.filter((v) => v > SQUAT_RULES.shallowKneeDeg3d).length;
       const msg = `valleys=${valleys.map((v) => v.toFixed(1)).join(',')}`;
-      console.log(`${c.label}: ${msg}`);
       expect(res.reps.length, msg).toBe(c.reps);
       expect(over, msg).toBe(c.over);
     });

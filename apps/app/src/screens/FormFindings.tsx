@@ -152,7 +152,17 @@ export function FormFindings({ store, queue, sessionId, session, onPlay }: FormF
       if (a.status === 'failed') {
         content = <p className="form-reason">{a.reason ? REASON_PHRASES[a.reason] : REASON_PHRASES.error}</p>;
       } else if (a.metrics.length > 0 && judged === 0) {
-        content = <p className="form-reason">{REASON_PHRASES.noPerson}</p>;
+        // 깊이 조언은 운동 중 3D 값으로 만들어 2D 사람 인식 실패와 무관하므로 문구 아래에 그대로 보인다(설계 2절)
+        content = (
+          <>
+            <p className="form-reason">{REASON_PHRASES.noPerson}</p>
+            {a.notes.map((n) => (
+              <p className="form-note" key={n.kind}>
+                <span className="form-icon" aria-hidden="true">ⓘ</span> {notePhrase(n)}
+              </p>
+            ))}
+          </>
+        );
       } else {
         content = (
           <>
