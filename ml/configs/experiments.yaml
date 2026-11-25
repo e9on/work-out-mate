@@ -61,7 +61,7 @@ stages:
     select: {squat: val}
     lr: 1.0e-4            # 머리 학습률(partial과 같음)
     body_lr_ratio: 0.1    # 몸통 = 머리 × 0.1 = 1e-5 (설계 ③, Task 7 BACKBONE_LR_RATIO). 빠지면 run_all이 예외
-    batch_size: 16        # R17: full 16 이하(16에서 6.41GB)
+    batch_size: 12        # R21: 16에서 실제 학습 중 OOM(2026-11-25, 상한 6.41GiB) → 12로 재실행. R17: full 16 이하
 
   mb_full_lunge_plank:    # mb_full(시드별) 몸통 고정, 런지·플랭크 머리만 EC3D 피험자 1~3으로
     kind: mb

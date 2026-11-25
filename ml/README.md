@@ -14,7 +14,7 @@ PowerShell, 저장소 루트(`C:\Coding\work-out-mate`) 기준. 각 단계의 �
 | 4 | 데이터 요약(분할·라벨 개수) | `cd ml; python -m wom_ml.dataset --summary; cd ..` | `ml/runs/dataset_summary.json` |
 | 5 | 전체 단계 실행 | `python ml/scripts/run_all.py` (먼저 `--dry-run`으로 계획 확인) | `ml/runs/run_all_status.json`의 단계가 모두 `done` |
 | 6 | 보고서 표 다시 만들기 | `cd ml; python -m wom_ml.report; cd ..` | `docs/finetune-experiment-results.md`의 자동 생성 절이 바뀜 |
-| 7 | 해석 보완 | 보고서의 '해석' 절(사람이 씀)에서 '(가중치 받은 뒤 채움)' 자리를 채운다 | — |
+| 7 | 해석 보완 | 보고서의 '해석' 절(사람이 씀)을 새 표에 맞게 갱신한다 | — |
 
 - 개인 녹화(본인 스쿼트)는 `packages/core/test/fixtures/private/angle-test/`(git 제외)에 있어야 4·5단계의 test_own·규칙 판정이 돈다. 읽기만 한다.
 - 5단계의 규칙 판정(rules)은 node와 `npx esbuild`(저장소 node_modules)를 쓴다.
@@ -100,7 +100,7 @@ OneDrive가 자동 다운로드를 막는다(403). 브라우저로 직접 받아
 |---|---|---|
 | rules | 1.7초(node 규칙 판정) | - (GPU 안 씀) |
 | small (스쿼트·런지·플랭크) | 15.2초 | 0.24GiB (0.68GiB) |
-| mb_probe | 가중치 받은 뒤 | 가중치 받은 뒤 |
-| mb_partial | 가중치 받은 뒤 | 가중치 받은 뒤 |
-| mb_full | 가중치 받은 뒤 | 가중치 받은 뒤 |
-| mb_full_lunge_plank | 가중치 받은 뒤 | 가중치 받은 뒤 |
+| mb_probe | 3289.0초 | 2.22GiB (3.73GiB) |
+| mb_partial | 1035.6초 | 5.24GiB (5.54GiB) |
+| mb_full (배치 12, R21) | 1612.8초 | 4.91GiB (6.21GiB) |
+| mb_full_lunge_plank | 4007.0초 | 2.28GiB (5.77GiB) |
