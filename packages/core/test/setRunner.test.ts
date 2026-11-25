@@ -120,6 +120,17 @@ describe('SetRunner: 스쿼트(보정 → 카운트다운 → 운동)', () => {
     expect(res.reps![0]!.endT).toBeLessThanOrEqual(res.reps![1]!.startT);
   });
 
+  it('세트 결과 reps의 bottomT는 실제 최저점 시각(반환선을 지난 시각이 아님)', () => {
+    // 175→60을 15프레임(33ms 간격)에 고르게 내려간다. 반환선(기준-60≈115)은 시작 뒤 약 6프레임,
+    // 최저점 60은 약 13프레임 뒤에 닿는다. bottomT가 최저점이면 시작에서 10프레임 넘게 떨어져 있다.
+    const r = squat({ kind: 'reps', reps: 1 });
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 4200), ...oneRep(175, 60), ...hold(175, 1000)], 'knee'));
+    const rep = finishedOf(out)!.result.reps![0]!;
+    expect(rep.bottomT - rep.startT).toBeGreaterThan(10 * DT);
+    expect(rep.bottomT).toBeLessThan(rep.endT);
+  });
+
   it('세트 결과 reps에 bottomSignal이 반복별 최저점으로 들어간다', () => {
     const r = squat({ kind: 'reps', reps: 2 });
     const c = new Clock();
