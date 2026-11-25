@@ -15,7 +15,12 @@ let stack: Entry[] = [];
 
 export function dispatchBack(): boolean {
   for (let i = stack.length - 1; i >= 0; i--) {
-    if (stack[i]!.current() !== false) return true;
+    try {
+      if (stack[i]!.current() !== false) return true;
+    } catch (e) {
+      // 처리기 하나가 실패해도 뒤로 가기 전체가 멈추지 않게, 그 처리기는 처리 안 함으로 보고 아래로 넘긴다
+      console.warn('뒤로 가기 처리기 오류', e);
+    }
   }
   return false;
 }

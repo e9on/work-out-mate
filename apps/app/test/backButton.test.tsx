@@ -60,4 +60,20 @@ describe('뒤로 가기 처리기', () => {
     expect(a1).not.toHaveBeenCalled();
     expect(a2).not.toHaveBeenCalled();
   });
+
+  it('처리기가 예외를 던지면 그 아래 처리기로 넘긴다', () => {
+    const a = vi.fn();
+    render(<Handler onBack={a} />);
+    render(
+      <Handler
+        onBack={() => {
+          throw new Error('x');
+        }}
+      />,
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(dispatchBack()).toBe(true);
+    expect(a).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
 });

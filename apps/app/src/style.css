@@ -53,6 +53,7 @@ body {
 .dialog-backdrop {
   position: fixed;
   inset: 0;
+  z-index: 100; /* 배치 안내(.placement)·재생 화면 등 겹친 화면보다 항상 위 */
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
