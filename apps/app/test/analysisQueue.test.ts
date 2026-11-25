@@ -151,7 +151,8 @@ describe('분석 대기열', () => {
     expect(a.frames[3]!.t).toBeCloseTo(STARTED + 200, 5);
     expect(a.metrics).toHaveLength(1);
     expect(a.metrics[0]!.skipped).toBeNull();
-    expect(a.findings.some((f) => f.kind === 'depth' && f.index === 1)).toBe(true);
+    // 깊이는 이제 반복별 지적이 아니라 세트 조언(notes)으로만 낸다
+    expect(a.findings.some((f) => f.kind === 'depth')).toBe(false);
     // 대기열에 넣을 때 한 번(분석 중 표시), 저장 뒤 한 번
     await vi.waitFor(() => expect(progress).toHaveBeenCalledTimes(2));
     expect(progress).toHaveBeenCalledWith('s1');
