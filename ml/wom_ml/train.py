@@ -189,6 +189,10 @@ def fit(model, train, val, cfg: dict, seed: int, out_dir: Path) -> dict:
             stopped_by = "early_stop"
             break
     if has_val:
+        if best_state is None:
+            raise RuntimeError(
+                "검증 손실이 한 번도 좋아지지 않아(값이 NaN이거나 계속 무한대) 저장할 최적 상태가 없습니다. "
+                "학습률·데이터·검증 손실 계산을 확인하세요.")
         model.load_state_dict(best_state)
     else:
         best_epoch = epoch

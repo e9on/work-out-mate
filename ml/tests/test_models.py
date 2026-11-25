@@ -155,6 +155,13 @@ def test_train_model_outputs_and_metrics(tmp_path):
     assert "pred" not in json.dumps(saved) and "X" not in saved
 
 
+def test_val_loss_never_improves_raises_clear_error(tmp_path, monkeypatch):
+    # 검증 손실이 NaN이면 best_state가 None으로 남는다 -> load_state_dict(None) 대신 알아보기 쉬운 오류
+    monkeypatch.setattr(tr, "_loss_on", lambda *a, **k: float("nan"))
+    with pytest.raises(RuntimeError, match="검증 손실이 한 번도 좋아지지 않아"):
+        tr.train_model(SmallGRU(HEADS, hidden=16), _data(), CFG, seed=0, out_dir=tmp_path)
+
+
 def test_no_val_samples_uses_fixed_epochs(tmp_path):
     cfg = {**CFG, "exercise": "lunge"}
     data = _data(val_ex=("squat",))
