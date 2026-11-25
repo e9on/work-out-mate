@@ -16,3 +16,5 @@ ml/data/
 ml/runs/
 ml/third_party/
 ml/weights/
+
+__pycache__/

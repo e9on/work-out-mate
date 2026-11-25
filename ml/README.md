@@ -72,8 +72,8 @@ PowerShell, 저장소 루트(`C:\Coding\work-out-mate`) 기준. 각 단계의 �
 OneDrive가 자동 다운로드를 막는다(403). 브라우저로 직접 받아 `ml/weights/`에 넣는다.
 
 1. 링크(MotionBERT README의 `MotionBERT-Lite (61MB)` 행): https://1drv.ms/f/s!AvAdh0LSjEOlgS27Ydcbpxlkl0ng?e=rq2Btn
-2. 폴더 안의 Lite 모델 체크포인트 `best_epoch.bin`(약 61MB)을 받는다.
-3. **`ml/weights/motionbert_lite.bin`** 이름으로 둔다(`ml/weights/` 폴더가 없으면 만든다). 코드(`wom_ml/models/motionbert.py`)와 테스트가 이 경로를 쓴다.
+2. 폴더 안의 Lite 모델 체크포인트 `MB_lite/latest_epoch.bin`(64,099,897바이트, 약 61MiB)을 받는다. 실제로 이 파일을 썼다.
+3. 받은 `latest_epoch.bin`을 **`ml/weights/motionbert_lite.bin`** 이름으로 바꿔 둔다(`ml/weights/` 폴더가 없으면 만든다). 코드(`wom_ml/models/motionbert.py`)와 테스트가 이 경로를 쓴다.
 4. 받은 뒤 크기·SHA256을 이 절에 적는다: `(미기록)`
 5. 확인: `python -m pytest ml/tests/test_motionbert.py` — 파일이 있으면 `test_real_weights_key_mismatch_zero`가 건너뛰지 않고 돈다(몸통 키 누락 0개, 남는 키는 원래 3D 출력 머리 `head.*`뿐).
 - 파일은 외부에서 받은 것이므로 `torch.load(..., weights_only=True)`로만 읽는다.

@@ -90,7 +90,7 @@ def _missing_weights_message(path: Path) -> str:
     return (f"MotionBERT-Lite 가중치 파일이 없음: {path}\n"
             f"받는 법은 ml/README.md의 'MotionBERT-Lite 사전학습 가중치' 절을 보세요 "
             f"(OneDrive https://1drv.ms/f/s!AvAdh0LSjEOlgS27Ydcbpxlkl0ng?e=rq2Btn 의 Lite 체크포인트 "
-            f"best_epoch.bin 을 받아 {DEFAULT_WEIGHTS} 즉 ml/weights/motionbert_lite.bin 으로 두기).")
+            f"MB_lite/latest_epoch.bin 을 받아 {DEFAULT_WEIGHTS} 즉 ml/weights/motionbert_lite.bin 으로 두기).")
 
 
 def _numpy_safe_globals() -> list:
