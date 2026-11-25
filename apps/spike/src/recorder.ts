@@ -59,8 +59,7 @@ export const isNativeApp = Capacitor.isNativePlatform();
  * 네이티브 앱: 먼저 문서(Documents) 폴더에 저장하고, 실패하면 앱 전용 폴더(Data, 권한 불필요)에 다시 저장한다.
  * 저장된 위치를 한국어 문자열로 돌려준다. 둘 다 실패할 때만 오류를 던진다.
  */
-export async function saveRecordingNative(file: RecordingFile): Promise<string> {
-  const name = recordingFileName(file);
+export async function saveRecordingNative(file: RecordingFile, name = recordingFileName(file)): Promise<string> {
   const data = JSON.stringify(file);
   try {
     const res = await Filesystem.writeFile({ path: name, data, directory: Directory.Documents, encoding: Encoding.UTF8 });
@@ -87,4 +86,73 @@ export function downloadRecording(file: RecordingFile): string {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
   return name;
+}
+
+/**
+ * 카메라 스트림을 동영상으로 함께 녹화한다(랜드마크와 같은 시계 performance.now로 시작 시각을 남김).
+ * 영상은 개인 신체 데이터다. 폰 문서 폴더에만 저장하고 어디로도 보내지 않는다(이 앱은 INTERNET 권한이 없다).
+ */
+export class VideoRecorder {
+  private rec: MediaRecorder | null = null;
+  private chunks: Blob[] = [];
+  startT = 0;
+  mimeType = '';
+
+  start(stream: MediaStream): void {
+    const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+    this.mimeType = types.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+    this.chunks = [];
+    this.rec = new MediaRecorder(stream, this.mimeType ? { mimeType: this.mimeType, videoBitsPerSecond: 2_500_000 } : undefined);
+    this.rec.ondataavailable = (e) => { if (e.data.size > 0) this.chunks.push(e.data); };
+    this.rec.start(1000);
+    this.startT = performance.now();
+  }
+
+  /** 멈추고 영상 Blob을 돌려준다. 녹화 중이 아니면 null. */
+  stop(): Promise<Blob | null> {
+    const rec = this.rec;
+    this.rec = null;
+    if (!rec || rec.state === 'inactive') return Promise.resolve(null);
+    return new Promise((resolve) => {
+      rec.onstop = () => resolve(new Blob(this.chunks, { type: rec.mimeType || this.mimeType || 'video/webm' }));
+      rec.stop();
+    });
+  }
+
+  get extension(): string {
+    return this.mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
+  }
+}
+
+function blobToBase64(b: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',', 2)[1] ?? '');
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(b);
+  });
+}
+
+/** 영상 Blob을 폰 문서 폴더(실패하면 앱 전용 폴더)에 저장하고 위치를 돌려준다. */
+export async function saveVideoNative(blob: Blob, name: string): Promise<string> {
+  const data = await blobToBase64(blob);
+  try {
+    await Filesystem.writeFile({ path: name, data, directory: Directory.Documents });
+    return `Documents/${name}`;
+  } catch {
+    await Filesystem.writeFile({ path: name, data, directory: Directory.Data });
+    return `files/${name}`;
+  }
+}
+
+/** 브라우저·PC 앱: 영상 Blob을 다운로드로 저장. */
+export function downloadBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
