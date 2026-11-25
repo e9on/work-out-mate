@@ -11,8 +11,11 @@ export type Target = { kind: 'reps'; reps: number } | { kind: 'seconds'; seconds
  */
 export type EndReason = 'target' | 'idle' | 'manual' | 'button' | 'released';
 
-/** 반복 하나의 시각. index는 1부터(세트 안 반복 번호), bottomT는 RepEvent.turnT. 시계는 쓰는 곳(SetResult·SetLog)을 따른다. */
-export type RepTiming = { index: number; startT: number; bottomT: number; endT: number };
+/**
+ * 반복 하나의 시각. index는 1부터(세트 안 반복 번호), bottomT는 RepEvent.turnT. 시계는 쓰는 곳(SetResult·SetLog)을 따른다.
+ * bottomSignal은 반복 카운터 신호 최저점(RepEvent.valley)이고, 스쿼트는 MediaPipe world 3D 무릎 각도다. 옛 기록엔 없을 수 있다.
+ */
+export type RepTiming = { index: number; startT: number; bottomT: number; endT: number; bottomSignal?: number };
 
 /** 세트 기록. 시각(startT·endT)은 프레임 시계(PoseFrame.t)와 같은 ms 단위다. */
 export type SetResult = {

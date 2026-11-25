@@ -660,7 +660,7 @@ describe('RoutineRunner: 수정 1회차', () => {
       // 프레임 시계 원본과 비교: SetRunner 결과의 reps에 E를 더한 값
       const fin = d.log.find((x) => isSetFinished(x.ev))!.ev;
       const raw = fin.type === 'set' && fin.event.type === 'finished' ? fin.event.result.reps! : [];
-      expect(reps).toEqual(raw.map((x) => ({ index: x.index, startT: E + x.startT, bottomT: E + x.bottomT, endT: E + x.endT })));
+      expect(reps).toEqual(raw.map((x) => ({ index: x.index, startT: E + x.startT, bottomT: E + x.bottomT, endT: E + x.endT, bottomSignal: x.bottomSignal })));
     });
 
     it('reps 필드가 없는 옛 세션 객체도 sessionSoFar·copy에서 깨지지 않는다', () => {

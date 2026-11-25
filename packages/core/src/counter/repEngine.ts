@@ -5,6 +5,8 @@ export type RepEvent = {
   endT: number;
   outMs: number;
   backMs: number;
+  /** 그 반복의 신호 최저점(원래 신호 단위). 'high' 운동은 최소값, 'low' 운동은 최대값 */
+  valley: number;
 };
 
 export type RestSide = 'high' | 'low';
@@ -189,6 +191,8 @@ export class RepEngine {
       endT,
       outMs: this.turnT - this.startT,
       backMs: endT - this.turnT,
+      // 내부 valley는 부호를 곱한 값이므로 원래 단위로 되돌린다.
+      valley: this.valley * this.sign,
     };
   }
 }
