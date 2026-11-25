@@ -150,6 +150,13 @@ describe('computeSquatRepMetrics', () => {
     expect(none.heelRise).toBeNull();
   });
 
+  it('computeSquatRepMetrics는 rep.bottomSignal을 depth3d로 옮긴다', () => {
+    const { frames, reps } = makeSet([GOOD, GOOD]);
+    const m = computeSquatRepMetrics(frames, [{ ...reps[0]!, bottomSignal: 77 }, reps[1]!]);
+    expect(m[0]!.depth3d).toBe(77);
+    expect(m[1]!.depth3d).toBeNull();
+  });
+
   it('서 있는 프레임이 없으면 비율·뒤꿈치·하강시간은 null', () => {
     const frames: KpFrame[] = [];
     for (let t = 0; t <= 2000; t += 50) frames.push(buildHalpe({ t, kneeDeg: 80, kneeAnkleRatio: 1.5, heelRise: 0.05 }));
@@ -166,12 +173,53 @@ describe('judgeSquat', () => {
     expect(run([GOOD]).judge).toEqual({ findings: [], notes: [], uncertain: [] });
   });
 
-  it('바닥 무릎 각도 110도면 depth, 그 반복은 kneeIn 판정 안 함', () => {
+  // 깊이는 반복별 지적(depth finding)에서 세트 조언(shallow note)으로 옮겼다. 옛 '110도면 depth finding' 시험을 새 동작으로 바꿈.
+  it('바닥 무릎 각도 110도(depth3d 없음)여도 depth finding은 없고 kneeIn 판정은 건너뛴다', () => {
     const { judge } = run([{ kneeDeg: 110, kneeAnkleRatio: 0.7, heelRise: 0.05 }]);
-    expect(judge.findings.map((f) => f.kind)).toEqual(['depth']);
-    expect(judge.findings[0]!.index).toBe(1);
-    expect(judge.findings[0]!.value).toBeCloseTo(110, 0);
+    expect(judge.findings).toEqual([]);
     expect(judge.uncertain).toEqual([]);
+  });
+
+  it('depth3d 83 초과 반복 수로 shallow note를 만든다', () => {
+    const m = [60, 83, 84, 95].map((d, i) => metric({ index: i + 1, depth3d: d }));
+    expect(judgeSquat(m, []).notes).toEqual([{ kind: 'shallow', count: 2, total: 4 }]);
+  });
+
+  it('덜 앉은 반복이 없으면 shallow note가 없다', () => {
+    const m = [60, 70].map((d, i) => metric({ index: i + 1, depth3d: d }));
+    expect(judgeSquat(m, []).notes).toEqual([]);
+  });
+
+  it('depth3d가 없는 반복은 total에서 빠진다', () => {
+    const m = [metric({ index: 1, depth3d: 90 }), metric({ index: 2, depth3d: null }), metric({ index: 3 })];
+    expect(judgeSquat(m, []).notes).toEqual([{ kind: 'shallow', count: 1, total: 1 }]);
+  });
+
+  it('2D로 skipped인 반복도 depth3d가 있으면 집계한다', () => {
+    const m = [metric({ index: 1, skipped: 'noPerson', depth3d: 90, kneeDeg: null, kneeAnkleRatio: null, heelRise: null, descentMs: null })];
+    expect(judgeSquat(m, []).notes).toEqual([{ kind: 'shallow', count: 1, total: 1 }]);
+  });
+
+  it('depth finding은 만들지 않는다(2D 무릎 120도여도)', () => {
+    const m = [metric({ index: 1, kneeDeg: 120, kneeAnkleRatio: 1.5 })];
+    expect(judgeSquat(m, []).findings.map((f) => f.kind)).not.toContain('depth');
+  });
+
+  it('무릎 모임 판정 건너뛰기는 depth3d가 있으면 3D 기준', () => {
+    const skip = judgeSquat([metric({ index: 1, depth3d: 90, kneeDeg: 70, kneeAnkleRatio: 0.5 })], []);
+    expect(skip.findings.map((f) => f.kind)).not.toContain('kneeIn');
+    const judged = judgeSquat([metric({ index: 1, depth3d: 60, kneeDeg: 120, kneeAnkleRatio: 0.5 })], []);
+    expect(judged.findings.map((f) => f.kind)).toContain('kneeIn');
+  });
+
+  it('depth3d가 없으면 지금처럼 2D 100° 기준으로 건너뛴다', () => {
+    const j = judgeSquat([metric({ index: 1, kneeDeg: 120, kneeAnkleRatio: 0.5 })], []);
+    expect(j.findings.map((f) => f.kind)).not.toContain('kneeIn');
+  });
+
+  it('fastDescent와 shallow가 같이 나오면 순서는 [fastDescent, shallow]', () => {
+    const m = [1, 2].map((i) => metric({ index: i, descentMs: 600, depth3d: 90 }));
+    expect(judgeSquat(m, []).notes.map((n) => n.kind)).toEqual(['fastDescent', 'shallow']);
   });
 
   it('비율 0.7이면 kneeIn, 1.0이면 uncertain, 1.2면 지적 없음', () => {
@@ -228,7 +276,7 @@ const privateFile = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'p
 const BOTTOMS_S = [6.9, 9.5, 12, 14.4, 21.8, 24.3, 26.7, 29.2, 36.9, 40, 43.1, 46.1, 49.4, 51.6, 53.7, 55.6, 58.6, 60.8, 63, 65.2];
 
 describe.skipIf(!existsSync(privateFile))('스쿼트 판정: 개인 녹화 회귀', () => {
-  it('깊이는 17~20번, kneeIn은 5~8번, heel은 9~12번만 지적한다', () => {
+  it('kneeIn은 5~8번, heel은 9~12번만 지적한다(깊이는 세트 조언으로 옮겨 depth finding 없음)', () => {
     const rec = JSON.parse(readFileSync(privateFile, 'utf8')) as {
       frames: { t: number; k: number[][] | null; s: number[] | null }[];
     };
@@ -246,7 +294,7 @@ describe.skipIf(!existsSync(privateFile))('스쿼트 판정: 개인 녹화 회�
     const summary = metrics
       .map((m) => `${m.index}:${m.skipped ?? `${m.kneeDeg?.toFixed(0)}/${m.kneeAnkleRatio?.toFixed(2)}/${m.heelRise?.toFixed(2)}`}`)
       .join(' ');
-    expect(by('depth'), summary).toEqual([17, 18, 19, 20]);
+    expect(by('depth'), summary).toEqual([]);
     expect(by('kneeIn'), summary).toEqual([5, 6, 7, 8]);
     expect(by('heel'), summary).toEqual([9, 10, 11, 12]);
     expect(by('kneeInRelative'), summary).toEqual([]);

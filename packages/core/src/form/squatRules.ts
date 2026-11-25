@@ -3,11 +3,17 @@ import { HALPE, type Kp2, type KpFrame } from './halpe';
 
 export type FindingKind = 'depth' | 'kneeIn' | 'kneeInRelative' | 'heel';
 
-/** 정확도 기준(설계 8.1)을 못 넘는 항목은 false로 꺼서 내보내지 않는다. */
-export const SQUAT_ENABLED: Record<FindingKind, boolean> = { depth: true, kneeIn: true, kneeInRelative: true, heel: true };
+/**
+ * 정확도 기준(설계 8.1)을 못 넘는 항목은 false로 꺼서 내보내지 않는다.
+ * depth: 깊이는 반복별 지적에서 세트 조언(notes의 shallow)으로 옮겼다. kind는 옛 분석 표시용으로만 남긴다.
+ */
+export const SQUAT_ENABLED: Record<FindingKind, boolean> = { depth: false, kneeIn: true, kneeInRelative: true, heel: true };
 
 export const SQUAT_RULES = {
+  /** 3D 최저점이 없을 때만 쓰는 대체 기준: 2D 무릎 각도가 이보다 크면 무릎 모임 판정을 건너뛴다 */
   depthMaxKneeDeg: 100,
+  /** 3D 반복 최저점이 이 값보다 크면(83 미포함) 덜 앉은 반복 */
+  shallowKneeDeg3d: 83,
   kneeInAbs: 0.9,
   kneeInUncertainMax: 1.1,
   relativeDrop: 0.15,
@@ -34,9 +40,13 @@ export type SquatRepMetrics = {
   heelRise: number | null;
   descentMs: number | null;
   skipped: null | 'noPerson' | 'oneLeg';
+  /** 반복 신호 최저점(3D 무릎 각도, 도). 2D로 skipped인 반복에도 채운다 */
+  depth3d?: number | null;
 };
 export type FormFinding = { index: number; kind: FindingKind; value: number };
-export type SetNote = { kind: 'fastDescent'; avgDescentMs: number };
+export type SetNote =
+  | { kind: 'fastDescent'; avgDescentMs: number }
+  | { kind: 'shallow'; count: number; total: number };
 export type SquatJudgement = { findings: FormFinding[]; notes: SetNote[]; uncertain: number[] };
 
 function median(xs: number[]): number | null {
@@ -146,7 +156,7 @@ export function computeSquatRepMetrics(frames: KpFrame[], reps: RepTiming[]): Sq
   const standHeel = [median(footVals(standing, 0)), median(footVals(standing, 1))];
 
   return reps.map((rep): SquatRepMetrics => {
-    const base = { index: rep.index, bottomT: rep.bottomT };
+    const base = { index: rep.index, bottomT: rep.bottomT, depth3d: rep.bottomSignal ?? null };
     const w = SQUAT_RULES.medianWindowMs;
     const win = infos.filter((f) => Math.abs(f.t - rep.bottomT) <= w);
     if (win.length === 0) return { ...base, kneeDeg: null, kneeAnkleRatio: null, heelRise: null, descentMs: null, skipped: 'noPerson' };
@@ -194,9 +204,9 @@ export function judgeSquat(
 
   for (const m of metrics) {
     if (m.skipped) continue;
-    // 깊이가 부족한 반복은 무릎 모임 판정을 하지 않는다(지적 노출 여부와 무관하게 판정 조건으로 본다)
-    const shallow = m.kneeDeg !== null && m.kneeDeg > R.depthMaxKneeDeg;
-    if (shallow && enabled.depth) findings.push({ index: m.index, kind: 'depth', value: m.kneeDeg! });
+    // 깊이가 부족한 반복은 무릎 모임 판정을 하지 않는다. 3D 최저점이 있으면 그 기준, 없으면 2D 100도 기준.
+    // (depth finding은 만들지 않는다. 깊이는 아래 notes의 shallow로 낸다)
+    const shallow = m.depth3d != null ? m.depth3d > R.shallowKneeDeg3d : m.kneeDeg !== null && m.kneeDeg > R.depthMaxKneeDeg;
 
     if (!shallow && m.kneeAnkleRatio !== null) {
       const r = m.kneeAnkleRatio;
@@ -233,5 +243,9 @@ export function judgeSquat(
     const avg = ds.reduce((a, b) => a + b, 0) / ds.length;
     if (avg < R.fastDescentMs) notes.push({ kind: 'fastDescent', avgDescentMs: avg });
   }
+  // 덜 앉은 반복 조언: 2D로 skipped인 반복도 depth3d가 있으면 센다
+  const depths = metrics.flatMap((m) => (m.depth3d != null ? [m.depth3d] : []));
+  const shallowCount = depths.filter((d) => d > R.shallowKneeDeg3d).length;
+  if (shallowCount > 0) notes.push({ kind: 'shallow', count: shallowCount, total: depths.length });
   return { findings, notes, uncertain };
 }
