@@ -45,35 +45,45 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
   useEffect(() => {
     analysisQueue.resumePending().catch((e) => console.warn('분석 이어서 하기 실패', e));
   }, [analysisQueue]);
-  // 처음 켤 때 영상 저장 안내: 동의 여부를 정한 적도, 안내를 본 적도 없으면 한 번 보여 준다.
+  const [screen, setScreen] = useState<Screen>({ kind: 'home' });
+  // 처음 켤 때 영상 저장 안내: 동의 여부를 정한 적도, 안내를 본 적도 없으면 홈에서 한 번 보여 준다.
+  // 홈으로 올 때마다 최신 설정으로 다시 판단한다(설정 화면에서 먼저 켰다면 묻지 않음).
   // 설정을 읽지 못하면(저장소 오류) 묻지 않는다. 설정 화면에서 언제든 켤 수 있다.
-  const [firstRun, setFirstRun] = useState<AppSettings | null>(null);
+  const [firstRun, setFirstRun] = useState(false);
+  const atHome = screen.kind === 'home';
   useEffect(() => {
+    if (!atHome) {
+      setFirstRun(false);
+      return;
+    }
     let alive = true;
     mediaStore.getSettings().then(
       (s) => {
-        if (alive && s.consent === null && !s.firstRunPrompted) setFirstRun(s);
+        if (alive) setFirstRun(s.consent === null && !s.firstRunPrompted);
       },
-      () => undefined,
+      (e) => console.warn('설정을 읽지 못해 첫 실행 안내를 건너뜀', e),
     );
     return () => {
       alive = false;
     };
-  }, [mediaStore]);
-  const finishFirstRun = (next: AppSettings) => {
-    setFirstRun(null);
-    mediaStore.putSettings(next).catch((e) => console.warn('첫 실행 안내 결과 저장 실패', e));
+  }, [atHome, mediaStore]);
+  // 닫을 때 최신 설정을 다시 읽어 병합한다. 그 사이 동의 여부가 정해졌으면 그 값을 덮어쓰지 않는다.
+  const finishFirstRun = (pick: (s: AppSettings) => AppSettings) => {
+    setFirstRun(false);
+    mediaStore
+      .getSettings()
+      .then((latest) => mediaStore.putSettings(latest.consent === null ? pick(latest) : { ...latest, firstRunPrompted: true }))
+      .catch((e) => console.warn('첫 실행 안내 결과 저장 실패', e));
   };
   const firstRunDialog = firstRun && (
     <ConsentPrompt
       cancelLabel="영상 없이 쓰기"
       onConfirm={(agreed) =>
-        finishFirstRun({ ...firstRun, videoEnabled: true, consent: { agreed, version: CONSENT_VERSION, at: Date.now() }, firstRunPrompted: true })
+        finishFirstRun((s) => ({ ...s, videoEnabled: true, consent: { agreed, version: CONSENT_VERSION, at: Date.now() }, firstRunPrompted: true }))
       }
-      onCancel={() => finishFirstRun({ ...firstRun, firstRunPrompted: true })}
+      onCancel={() => finishFirstRun((s) => ({ ...s, firstRunPrompted: true }))}
     />
   );
-  const [screen, setScreen] = useState<Screen>({ kind: 'home' });
   const [nextOrder, setNextOrder] = useState(0);
   const home = () => setScreen({ kind: 'home' });
 

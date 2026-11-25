@@ -82,5 +82,27 @@ describe('App', () => {
       await new Promise((r) => setTimeout(r, 20));
       expect(screen.queryByRole('dialog', { name: '영상 저장 안내' })).not.toBeInTheDocument();
     });
+
+    it('체크하지 않고 확인하면 영상 저장은 켜고 학습 데이터 동의는 하지 않은 것으로 남긴다', async () => {
+      const media = createMemoryMediaStore();
+      render(<App storage={createMemoryStorage()} mediaStore={media} />);
+      const dlg = await screen.findByRole('dialog', { name: '영상 저장 안내' });
+      fireEvent.click(within(dlg).getByRole('button', { name: '확인' }));
+      await waitFor(async () => expect((await media.getSettings()).firstRunPrompted).toBe(true));
+      const s = await media.getSettings();
+      expect(s.videoEnabled).toBe(true);
+      expect(s.consent).toMatchObject({ agreed: false, version: 'v1' });
+    });
+
+    it('안내가 떠 있는 동안 다른 곳에서 동의 여부가 정해졌으면 그 설정을 덮어쓰지 않는다', async () => {
+      const media = createMemoryMediaStore();
+      render(<App storage={createMemoryStorage()} mediaStore={media} />);
+      const dlg = await screen.findByRole('dialog', { name: '영상 저장 안내' });
+      const decided = { ...DEFAULT_SETTINGS, videoEnabled: true, consent: { agreed: true, version: 'v1', at: 5 } };
+      await media.putSettings(decided);
+      fireEvent.click(within(dlg).getByRole('button', { name: '영상 없이 쓰기' }));
+      await waitFor(async () => expect((await media.getSettings()).firstRunPrompted).toBe(true));
+      expect(await media.getSettings()).toEqual({ ...decided, firstRunPrompted: true });
+    });
   });
 });
