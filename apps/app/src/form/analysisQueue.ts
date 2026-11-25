@@ -232,7 +232,8 @@ export function createAnalysisQueue(deps: AnalysisQueueDeps): AnalysisQueue {
     const session = await storage.getSession(video.sessionId);
     const log = session?.sets.find((l) => l.exerciseIndex === video.exerciseIndex && l.setIndex === video.setIndex);
     if (!session || !log) return 'retry';
-    // 옛 기록(반복 시각 없음)이나 스쿼트가 아닌 세트는 분석하지 않고 건너뛴다
+    // 옛 기록(반복 시각 없음)이나 스쿼트가 아닌 세트는 분석하지 않고 건너뛴다.
+    // 반복 시각은 있어도 bottomSignal(3D 최저점)이 없는 세트는 분석은 하되 깊이 조언(notes)은 내지 않는다.
     if (log.exercise !== 'squat' || !log.reps || log.reps.length === 0) return 'done';
 
     let a: SetAnalysis;

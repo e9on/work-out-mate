@@ -1,3 +1,4 @@
+import { useBackHandler } from '../platform/backButton';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HALPE, type KpFrame, type WorkoutSession } from '@wom/core';
 import type { ManualErrorKind, RepLabel, SetKey } from '../form/types';
@@ -97,6 +98,7 @@ function drawSkeleton(ctx: CanvasRenderingContext2D, w: number, h: number, frame
 
 /** 한 반복의 영상 재생(시작 1초 전부터), 관절 선 겹치기, 직접 라벨. */
 export function RepPlayer({ store, storage, sessionId, setKey: key, index, onBack }: RepPlayerProps) {
+  useBackHandler(() => onBack());
   const [cur, setCur] = useState(index);
   const [session, setSession] = useState<WorkoutSession | null | undefined>(undefined);
   const [video, setVideo] = useState<Source | null | undefined>(undefined);

@@ -1,3 +1,5 @@
+import { useBackHandler } from '../platform/backButton';
+
 export type ConfirmDialogProps = {
   title: string;
   message: string;
@@ -7,6 +9,7 @@ export type ConfirmDialogProps = {
 };
 
 export function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCancel }: ConfirmDialogProps) {
+  useBackHandler(() => onCancel());
   return (
     <div className="dialog-backdrop">
       <div className="dialog" role="alertdialog" aria-modal="true" aria-label={title}>

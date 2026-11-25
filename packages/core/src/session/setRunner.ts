@@ -430,7 +430,7 @@ export class SetRunner {
       startT: this.startT,
       endT: t,
       endReason: reason,
-      reps: this.reps.map((r, i) => ({ index: i + 1, startT: r.startT, bottomT: r.turnT, endT: r.endT })),
+      reps: this.reps.map((r, i) => ({ index: i + 1, startT: r.startT, bottomT: r.valleyT, endT: r.endT, bottomSignal: r.valley })),
     };
     this.ph = 'finished';
     out.push({ type: 'finished', reason, result: copyResult(this.res) });

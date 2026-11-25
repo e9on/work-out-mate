@@ -207,6 +207,21 @@ describe('FormFindings', () => {
     expect(screen.getByText('분석 중… (0/1)')).toBeInTheDocument();
   });
 
+  it('shallow 세트 조언은 ⓘ 줄로 보이고 "자세 지적 없음"은 보이지 않는다', async () => {
+    const store = await setup({ analyses: [analysis(0, { notes: [{ kind: 'shallow', count: 4, total: 10 }] })] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
+    expect(await screen.findByText(/이번 세트는 10회 중 4회를 덜 앉았어요\. 허벅지가 바닥과 평행해질 때까지 앉아 보세요/)).toBeInTheDocument();
+    expect(screen.getAllByText('ⓘ')).toHaveLength(1);
+    expect(screen.queryByText('자세 지적 없음')).toBeNull();
+  });
+
+  it('옛 분석의 depth 지적(notes 비어 있음)은 기존 문구로 계속 보인다', async () => {
+    const store = await setup({ analyses: [analysis(0, { findings: [{ index: 4, kind: 'depth', value: 1 }] })] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
+    expect(await screen.findByText(/허벅지가 바닥과 평행해질 때까지 앉지 않았어요/)).toBeInTheDocument();
+    expect(screen.queryByText('자세 지적 없음')).toBeNull();
+  });
+
   it('영상이 정리된 뒤에도 videoStartedAt으로 m:ss와 ▶을 보인다', async () => {
     const onPlay = vi.fn();
     const store = await setup({ videos: [], analyses: [analysis(0, { videoStartedAt: STARTED, findings: [{ index: 4, kind: 'depth', value: 1 }] })] });
@@ -245,6 +260,14 @@ describe('FormFindings', () => {
     render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
     expect(await screen.findByText('사람이 화면에 보이지 않아 분석하지 못했어요')).toBeInTheDocument();
     expect(screen.queryByText('자세 지적 없음')).toBeNull();
+  });
+
+  it('판정한 반복이 없어도 깊이 조언(ⓘ)은 사유 아래에 보인다', async () => {
+    const store = await setup({ analyses: [analysis(0, { metrics: [m(1, 'noPerson')], notes: [{ kind: 'shallow', count: 1, total: 1 }] })] });
+    render(<FormFindings store={store} sessionId={SID} session={session([log(0, reps)])} />);
+    expect(await screen.findByText('사람이 화면에 보이지 않아 분석하지 못했어요')).toBeInTheDocument();
+    expect(screen.getByText(/이번 세트는 1회 중 1회를 덜 앉았어요/)).toBeInTheDocument();
+    expect(screen.getAllByText('ⓘ')).toHaveLength(1);
   });
 
   it('일부 반복만 판정했으면 "n회는 판정하지 못했어요" 한 줄을 더한다', async () => {

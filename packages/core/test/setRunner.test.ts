@@ -120,6 +120,41 @@ describe('SetRunner: 스쿼트(보정 → 카운트다운 → 운동)', () => {
     expect(res.reps![0]!.endT).toBeLessThanOrEqual(res.reps![1]!.startT);
   });
 
+  it('세트 결과 reps의 bottomT는 실제 최저점 시각(반환선을 지난 시각이 아님)', () => {
+    // 175→60을 15프레임(33ms 간격)에 고르게 내려간다. 반환선(기준-60≈115)은 시작 뒤 약 6프레임,
+    // 최저점 60은 약 13프레임 뒤에 닿는다. bottomT가 최저점이면 시작에서 10프레임 넘게 떨어져 있다.
+    const r = squat({ kind: 'reps', reps: 1 });
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 4200), ...oneRep(175, 60), ...hold(175, 1000)], 'knee'));
+    const rep = finishedOf(out)!.result.reps![0]!;
+    expect(rep.bottomT - rep.startT).toBeGreaterThan(10 * DT);
+    expect(rep.bottomT).toBeLessThan(rep.endT);
+  });
+
+  it('세트 결과 reps에 bottomSignal이 반복별 최저점으로 들어간다', () => {
+    const r = squat({ kind: 'reps', reps: 2 });
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 4200), ...oneRep(175, 90), ...oneRep(175, 80), ...hold(175, 1000)], 'knee'));
+    const res = finishedOf(out)!.result;
+    const bottoms = res.reps!.map((x) => x.bottomSignal!);
+    expect(bottoms).toHaveLength(2);
+    expect(bottoms[0]).toBeGreaterThan(89); expect(bottoms[0]).toBeLessThan(92);
+    expect(bottoms[1]).toBeGreaterThan(79); expect(bottoms[1]).toBeLessThan(82);
+  });
+
+  it('되돌려진 반복의 bottomSignal은 빠지고 남은 반복은 자기 값을 유지한다', () => {
+    const r = squat({ kind: 'reps', reps: 10 });
+    const c = new Clock();
+    const out = feed(r, c.frames([...hold(175, 4200), ...oneRep(175, 90), ...oneRep(175, 80), ...oneRep(175, 70)], 'knee'));
+    for (const ev of r.stop(c.t, 'button')) out.push({ t: c.t, ev });
+    const res = finishedOf(out)!.result;
+    expect(res.count).toBeLessThan(3);
+    expect(res.count).toBeGreaterThan(0);
+    const bottoms = res.reps!.map((x) => x.bottomSignal!);
+    expect(bottoms).toHaveLength(res.count);
+    [90, 80].slice(0, res.count).forEach((v, i) => expect(Math.abs(bottoms[i]! - v)).toBeLessThan(2));
+  });
+
   it('세트 끝(button)으로 마지막 반복이 되돌려지면 reps 길이 === count', () => {
     const r = squat({ kind: 'reps', reps: 10 });
     const c = new Clock();
