@@ -1,3 +1,4 @@
+import { BackHandlerOn } from '../platform/backButton';
 import { useRef, useState } from 'react';
 import type { ExerciseId, Routine } from '@wom/core';
 import type { Storage } from '../ports/storage';
@@ -198,6 +199,7 @@ export function RoutineEdit({ storage, routine, nextOrder, onDone, now = Date.no
         )}
       </div>
 
+      {confirming && <BackHandlerOn onBack={() => setConfirming(false)} />}
       {confirming && (
         <div className="dialog-backdrop">
           <div role="dialog" aria-modal="true" aria-labelledby="del-title" className="dialog">

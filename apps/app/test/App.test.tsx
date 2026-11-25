@@ -5,6 +5,8 @@ import { createMemoryStorage } from '../src/storage/memoryStorage';
 import { createMemoryMediaStore } from '../src/storage/memoryMediaStore';
 import { makeFakeWorkout } from './fakeWorkout';
 import { DEFAULT_SETTINGS } from '../src/form/types';
+import { act } from '@testing-library/react';
+import { dispatchBack } from '../src/platform/backButton';
 
 describe('App', () => {
   it('홈 제목 "Work Out Mate"가 보인다', async () => {
@@ -103,6 +105,63 @@ describe('App', () => {
       fireEvent.click(within(dlg).getByRole('button', { name: '영상 없이 쓰기' }));
       await waitFor(async () => expect((await media.getSettings()).firstRunPrompted).toBe(true));
       expect(await media.getSettings()).toEqual({ ...decided, firstRunPrompted: true });
+    });
+  });
+
+  describe('폰 뒤로 가기', () => {
+    const settled = async () => {
+      const media = createMemoryMediaStore();
+      await media.putSettings({ ...DEFAULT_SETTINGS, firstRunPrompted: true });
+      return media;
+    };
+
+    it('설정·기록·루틴 편집에서 뒤로 가면 홈으로 간다', async () => {
+      render(<App storage={createMemoryStorage()} mediaStore={await settled()} />);
+      for (const [button, title] of [['설정', '설정'], ['기록', '기록'], ['루틴 만들기', '새 루틴']] as const) {
+        fireEvent.click(await screen.findByRole('button', { name: button }));
+        await screen.findByRole('heading', { name: title });
+        act(() => {
+          expect(dispatchBack()).toBe(true);
+        });
+        await screen.findByRole('heading', { name: 'Work Out Mate' });
+      }
+    });
+
+    it('홈에서는 처리하지 않는다(앱이 기본 동작으로 닫히거나 뒤로 간다)', async () => {
+      render(<App storage={createMemoryStorage()} mediaStore={await settled()} />);
+      await screen.findByRole('heading', { name: 'Work Out Mate' });
+      expect(dispatchBack()).toBe(false);
+    });
+
+    it('대화 상자가 떠 있으면 뒤로 가기는 대화 상자만 닫는다', async () => {
+      render(<App storage={createMemoryStorage()} mediaStore={createMemoryMediaStore()} />);
+      await screen.findByRole('dialog', { name: '영상 저장 안내' });
+      act(() => {
+        expect(dispatchBack()).toBe(true);
+      });
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: '영상 저장 안내' })).not.toBeInTheDocument());
+      expect(screen.getByRole('heading', { name: 'Work Out Mate' })).toBeInTheDocument();
+    });
+
+    it('운동 중 뒤로 가기는 그만할지 묻고, 한 번 더 누르면 묻는 창만 닫고 운동을 이어 간다', async () => {
+      const fw = makeFakeWorkout();
+      render(<App storage={createMemoryStorage()} mediaStore={await settled()} workoutDeps={fw.deps} />);
+      fireEvent.click(await screen.findByRole('button', { name: '루틴 만들기' }));
+      fireEvent.change(screen.getByLabelText('루틴 이름'), { target: { value: '아침 루틴' } });
+      fireEvent.change(screen.getByLabelText('추가할 운동'), { target: { value: 'squat' } });
+      fireEvent.click(screen.getByRole('button', { name: '운동 추가' }));
+      fireEvent.click(screen.getByRole('button', { name: '저장' }));
+      fireEvent.click(await screen.findByRole('button', { name: '시작' }));
+      expect(await screen.findByText(/^스쿼트 1\/\d+세트$/)).toBeInTheDocument();
+      act(() => {
+        expect(dispatchBack()).toBe(true);
+      });
+      expect(await screen.findByText('운동을 그만할까요? 지금까지 한 세트는 저장돼요.')).toBeInTheDocument();
+      act(() => {
+        expect(dispatchBack()).toBe(true);
+      });
+      await waitFor(() => expect(screen.queryByText('운동을 그만할까요? 지금까지 한 세트는 저장돼요.')).not.toBeInTheDocument());
+      expect(screen.getByText(/^스쿼트 1\/\d+세트$/)).toBeInTheDocument();
     });
   });
 });

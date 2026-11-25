@@ -1,3 +1,4 @@
+import { BackHandlerOn, useBackHandler } from '../platform/backButton';
 import { useEffect, useRef, useState } from 'react';
 import { LM, type PoseFrame, type Routine } from '@wom/core';
 import type { EngineView } from '../workout/engine';
@@ -25,6 +26,8 @@ export type WorkoutProps = {
  */
 export function Workout({ view, routine, pose, getVideo, onPause, onResume, onSkip, onStop, onEndSet }: WorkoutProps) {
   const [confirming, setConfirming] = useState(false);
+  // 운동 중 폰 뒤로 가기: 바로 끝내지 않고 '그만할까요?'를 묻는다
+  useBackHandler(() => setConfirming(true));
   const hint = useLastHint(view, routine);
   const ex = routine.exercises[view.exerciseIndex];
   const set = view.set;
@@ -73,6 +76,7 @@ export function Workout({ view, routine, pose, getVideo, onPause, onResume, onSk
         </button>
       </div>
 
+      {confirming && <BackHandlerOn onBack={() => setConfirming(false)} />}
       {confirming && (
         <div className="dialog-backdrop">
           <div role="dialog" aria-modal="true" aria-labelledby="stop-title" className="dialog">

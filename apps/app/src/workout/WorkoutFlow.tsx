@@ -1,3 +1,4 @@
+import { useBackHandler } from '../platform/backButton';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Routine } from '@wom/core';
 import type { Storage } from '../ports/storage';
@@ -103,6 +104,13 @@ export function WorkoutFlow({ routine, storage, mediaStore, analysisQueue, onHom
 
   // 결과 화면에서 다시 보기를 누르면 그 위에 재생 화면을 겹쳐 띄운다
   const [player, setPlayer] = useState<{ setKey: SetKey; index: number } | null>(null);
+  // 폰 뒤로 가기: 결과 화면이면 홈으로. 운동 중이면 아래(운동 화면의 '그만할까요?' 또는 App)로 넘긴다.
+  // 재생 화면이 떠 있으면 RepPlayer가 위에서 먼저 받아 재생 화면만 닫는다.
+  useBackHandler(() => {
+    if (!ended) return false;
+    onHome();
+    return true;
+  });
 
   const getVideo = useCallback(() => videoRef.current, []);
 

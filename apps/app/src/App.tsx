@@ -19,6 +19,7 @@ import { APP_VERSION } from './appVersion';
 import { RepPlayer } from './screens/RepPlayer';
 import type { AppSettings, SetKey } from './form/types';
 import { WorkoutFlow, type WorkoutFlowDeps } from './workout/WorkoutFlow';
+import { useBackHandler } from './platform/backButton';
 
 // 라우터 라이브러리 없이 상태 하나로 화면을 고른다.
 type Screen =
@@ -84,6 +85,25 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
       onCancel={() => finishFirstRun((s) => ({ ...s, firstRunPrompted: true }))}
     />
   );
+  // 폰 뒤로 가기: 화면마다 바로 위 화면으로. 홈은 처리하지 않아 앱 기본 동작(뒤로 보냄)으로 넘긴다.
+  // 운동 중에는 WorkoutFlow·Workout이 위에서 먼저 받고, 넘어오면 아무것도 하지 않는다(운동이 끊기지 않게).
+  useBackHandler(() => {
+    switch (screen.kind) {
+      case 'home':
+        return false;
+      case 'detail':
+        setScreen({ kind: 'history' });
+        return true;
+      case 'player':
+        setScreen({ kind: 'detail', sessionId: screen.sessionId });
+        return true;
+      case 'workout':
+        return true;
+      default:
+        setScreen({ kind: 'home' });
+        return true;
+    }
+  });
   const [nextOrder, setNextOrder] = useState(0);
   const home = () => setScreen({ kind: 'home' });
 
