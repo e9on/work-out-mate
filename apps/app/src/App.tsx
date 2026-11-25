@@ -12,11 +12,12 @@ import { RoutineEdit } from './screens/RoutineEdit';
 import { History } from './screens/History';
 import { SessionDetail } from './screens/SessionDetail';
 import { Settings } from './screens/Settings';
+import { CONSENT_VERSION, ConsentPrompt } from './screens/ConsentPrompt';
 import { runExport } from './form/exportData';
 import { createExportFile } from './platform/exportFile';
 import { APP_VERSION } from './appVersion';
 import { RepPlayer } from './screens/RepPlayer';
-import type { SetKey } from './form/types';
+import type { AppSettings, SetKey } from './form/types';
 import { WorkoutFlow, type WorkoutFlowDeps } from './workout/WorkoutFlow';
 
 // 라우터 라이브러리 없이 상태 하나로 화면을 고른다.
@@ -44,6 +45,34 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
   useEffect(() => {
     analysisQueue.resumePending().catch((e) => console.warn('분석 이어서 하기 실패', e));
   }, [analysisQueue]);
+  // 처음 켤 때 영상 저장 안내: 동의 여부를 정한 적도, 안내를 본 적도 없으면 한 번 보여 준다.
+  // 설정을 읽지 못하면(저장소 오류) 묻지 않는다. 설정 화면에서 언제든 켤 수 있다.
+  const [firstRun, setFirstRun] = useState<AppSettings | null>(null);
+  useEffect(() => {
+    let alive = true;
+    mediaStore.getSettings().then(
+      (s) => {
+        if (alive && s.consent === null && !s.firstRunPrompted) setFirstRun(s);
+      },
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, [mediaStore]);
+  const finishFirstRun = (next: AppSettings) => {
+    setFirstRun(null);
+    mediaStore.putSettings(next).catch((e) => console.warn('첫 실행 안내 결과 저장 실패', e));
+  };
+  const firstRunDialog = firstRun && (
+    <ConsentPrompt
+      cancelLabel="영상 없이 쓰기"
+      onConfirm={(agreed) =>
+        finishFirstRun({ ...firstRun, videoEnabled: true, consent: { agreed, version: CONSENT_VERSION, at: Date.now() }, firstRunPrompted: true })
+      }
+      onCancel={() => finishFirstRun({ ...firstRun, firstRunPrompted: true })}
+    />
+  );
   const [screen, setScreen] = useState<Screen>({ kind: 'home' });
   const [nextOrder, setNextOrder] = useState(0);
   const home = () => setScreen({ kind: 'home' });
@@ -102,13 +131,16 @@ export function App({ storage: injected, mediaStore: injectedMedia, analysisQueu
       return <WorkoutFlow key={screen.routine.id} routine={screen.routine} storage={storage} mediaStore={mediaStore} analysisQueue={analysisQueue} onHome={home} deps={workoutDeps} />;
     default:
       return (
-        <Home
-          storage={storage}
-          onStart={(routine) => setScreen({ kind: 'workout', routine })}
-          onEdit={(routine) => setScreen({ kind: 'edit', routine })}
-          onHistory={() => setScreen({ kind: 'history' })}
-          onSettings={() => setScreen({ kind: 'settings' })}
-        />
+        <>
+          <Home
+            storage={storage}
+            onStart={(routine) => setScreen({ kind: 'workout', routine })}
+            onEdit={(routine) => setScreen({ kind: 'edit', routine })}
+            onHistory={() => setScreen({ kind: 'history' })}
+            onSettings={() => setScreen({ kind: 'settings' })}
+          />
+          {firstRunDialog}
+        </>
       );
   }
 }

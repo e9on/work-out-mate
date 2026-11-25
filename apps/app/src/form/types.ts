@@ -65,5 +65,7 @@ export type AppSettings = {
   videoEnabled: boolean;
   consent: { agreed: boolean; version: string; at: number } | null;
   guideSeen: number;
+  /** 처음 켤 때 영상 저장 안내를 이미 보여 줬는지. 옛 설정에는 없다(없으면 아직 안 보여 준 것으로 본다) */
+  firstRunPrompted?: boolean;
 };
 export const DEFAULT_SETTINGS: AppSettings = { videoEnabled: false, consent: null, guideSeen: 0 };

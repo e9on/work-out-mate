@@ -11,10 +11,12 @@ export type ConsentPromptProps = {
   /** agreed: 학습 데이터 동의 체크 여부. 체크하지 않아도 영상 저장은 켜진다 */
   onConfirm: (agreed: boolean) => void;
   onCancel: () => void;
+  /** 취소 버튼 글자. 처음 켤 때 안내에서는 '영상 없이 쓰기' */
+  cancelLabel?: string;
 };
 
-/** 영상 저장을 처음 켤 때 보이는 안내. 학습 데이터 동의는 영상 저장과 별도의 선택 항목이다 */
-export function ConsentPrompt({ onConfirm, onCancel }: ConsentPromptProps) {
+/** 영상 저장을 처음 켤 때(앱을 처음 켤 때, 또는 설정에서 켤 때) 보이는 안내. 학습 데이터 동의는 영상 저장과 별도의 선택 항목이다 */
+export function ConsentPrompt({ onConfirm, onCancel, cancelLabel = '취소' }: ConsentPromptProps) {
   const [agreed, setAgreed] = useState(false);
   return (
     <div className="dialog-backdrop">
@@ -37,7 +39,7 @@ export function ConsentPrompt({ onConfirm, onCancel }: ConsentPromptProps) {
             확인
           </button>
           <button type="button" onClick={onCancel}>
-            취소
+            {cancelLabel}
           </button>
         </div>
       </div>
