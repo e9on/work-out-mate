@@ -211,9 +211,30 @@ describe('RepEngine + fixedStrategy', () => {
   it('완전한 1회: 이벤트 시각과 구간 길이', () => {
     const e = engineOf(FIXED);
     const ev = run(e, [[0, 170], [100, 140], [533, 90], [566, 92], [1000, 165], [1033, 170]]);
-    expect(ev).toEqual([{ index: 1, startT: 100, turnT: 533, endT: 1000, outMs: 433, backMs: 467 }]);
+    expect(ev).toEqual([{ index: 1, startT: 100, turnT: 533, endT: 1000, outMs: 433, backMs: 467, valley: 90, valleyT: 533 }]);
     expect(e.count).toBe(1);
     expect(e.phase).toBe('rest');
+  });
+
+  it('RepEvent.valley는 반복 중 신호 최저점', () => {
+    const e = engineOf(FIXED);
+    const ev = run(e, [[0, 170], [300, 100], [600, 95], [900, 120], [1200, 170]]);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.valley).toBe(95);
+  });
+
+  it('RepEvent.valleyT는 최저점에 닿은 시각(반환선을 지난 turnT가 아님)', () => {
+    const e = engineOf(FIXED);
+    // FIXED 반환선은 95: 300ms에 반환선, 600ms에 최저점 80
+    const ev = run(e, [[0, 170], [100, 140], [300, 95], [600, 80], [900, 120], [1200, 170]]);
+    expect(ev[0]!.turnT).toBe(300);
+    expect(ev[0]!.valleyT).toBe(600);
+  });
+
+  it('최저값이 여러 번 같으면 처음 닿은 시각을 valleyT로 둔다', () => {
+    const e = engineOf(FIXED);
+    const ev = run(e, [[0, 170], [100, 140], [300, 95], [600, 80], [700, 80], [900, 120], [1200, 170]]);
+    expect(ev[0]!.valleyT).toBe(600);
   });
 
   it('오래 가림이면 진행 중 반복을 버린다', () => {
@@ -230,7 +251,7 @@ describe('RepEngine + fixedStrategy', () => {
     const cfg: RepConfig = { restSide: 'low', enter: 100, turn: 140, exit: 95, minRepMs: 500, pauseAfterMs: 1500, countAt: 'turn' };
     const e = engineOf(cfg);
     const ev = run(e, [[0, 50], [100, 110], [900, 145], [1000, 150]]);
-    expect(ev).toEqual([{ index: 1, startT: 100, turnT: 900, endT: 900, outMs: 800, backMs: 0 }]);
+    expect(ev).toEqual([{ index: 1, startT: 100, turnT: 900, endT: 900, outMs: 800, backMs: 0, valley: 145, valleyT: 900 }]);
     // 재무장(exit 너머) 전에는 바닥에서 흔들려도 다시 세지 않는다
     run(e, [[1100, 120], [1400, 150]]);
     expect(e.count).toBe(1);
@@ -257,7 +278,7 @@ describe('RepEngine + adaptiveStrategy', () => {
     expect(judge.calibrationSource).toBe('measured');
     expect(e.phase).toBe('rest');
     const ev = run(e, [[1100, 150], [1300, 120], [1700, 151]]);
-    expect(ev).toEqual([{ index: 1, startT: 1100, turnT: 1300, endT: 1700, outMs: 200, backMs: 400 }]);
+    expect(ev).toEqual([{ index: 1, startT: 1100, turnT: 1300, endT: 1700, outMs: 200, backMs: 400, valley: 120, valleyT: 1300 }]);
   });
 
   it('ready가 true가 아닌 프레임은 보정에 쓰지 않는다', () => {
@@ -304,13 +325,20 @@ describe('RepEngine: 껍데기는 전략이 정한 선만으로 판정한다', (
     run(e, [[20, 90]]);
     expect(e.phase).toBe('rest');
     const ev = run(e, [[30, 90], [40, 40], [50, 10], [60, 75]]);
-    expect(ev).toEqual([{ index: 1, startT: 40, turnT: 50, endT: 60, outMs: 10, backMs: 10 }]);
+    expect(ev).toEqual([{ index: 1, startT: 40, turnT: 50, endT: 60, outMs: 10, backMs: 10, valley: 10, valleyT: 50 }]);
   });
 
   it('restSide low면 신호 부호를 뒤집어 같은 선과 비교한다', () => {
     const e = new RepEngine(fake(0), { restSide: 'low', minRepMs: 0, pauseAfterMs: 1000 });
     const ev = run(e, [[0, -90], [10, -40], [20, -10], [30, -75]]);
     expect(ev).toHaveLength(1);
+  });
+
+  it("restSide 'low'면 valley는 원래 단위의 최대점", () => {
+    const e = new RepEngine(fake(0), { restSide: 'low', minRepMs: 0, pauseAfterMs: 1000 });
+    const ev = run(e, [[0, -90], [10, -40], [20, -10], [30, -75]]);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.valley).toBe(-10);
   });
 
   it('최소 시간 미달이면 이벤트 없이 rest로', () => {

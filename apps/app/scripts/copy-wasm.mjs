@@ -28,3 +28,22 @@ if (!existsSync(modelSrc)) {
   copyFileSync(modelSrc, resolve(dstDir, MODEL));
   console.log(`모델 복사: ${modelSrc} -> ${resolve(dstDir, MODEL)}`);
 }
+
+// 자세 분석용 RTMPose-m 모델과 ONNX Runtime Web 파일을 public/form/ 으로 복사한다(역시 git 제외, 없으면 경고만).
+const formDst = resolve(here, '../public/form');
+const spikeMp = resolve(here, '../../spike/public/mediapipe');
+const rtmSrc = resolve(spikeMp, 'bench/rtmpose-m.onnx');
+const ortSrc = resolve(spikeMp, 'ort');
+mkdirSync(resolve(formDst, 'ort'), { recursive: true });
+if (!existsSync(rtmSrc)) {
+  console.warn(`경고: ${rtmSrc} 이 없어서 RTMPose 모델은 복사하지 않아요. 자세 분석 실행에는 필요해요.`);
+} else {
+  copyFileSync(rtmSrc, resolve(formDst, 'rtmpose-m.onnx'));
+  console.log(`RTMPose 모델 복사: ${rtmSrc} -> ${resolve(formDst, 'rtmpose-m.onnx')}`);
+}
+if (!existsSync(ortSrc)) {
+  console.warn(`경고: ${ortSrc} 이 없어서 ONNX Runtime 파일은 복사하지 않아요.`);
+} else {
+  cpSync(ortSrc, resolve(formDst, 'ort'), { recursive: true });
+  console.log(`ORT 파일 복사: ${ortSrc} -> ${resolve(formDst, 'ort')}`);
+}

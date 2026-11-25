@@ -32,6 +32,7 @@ export type {
   Target,
   EndReason,
   SetResult,
+  RepTiming,
   RoutineExercise,
   Routine,
   SetLog,
@@ -40,3 +41,7 @@ export type {
 export { RoutineRunner } from './session/routineRunner';
 export type { RoutineEvent, RoutineRunnerOptions, RoutinePhase, NextSet, RoutineSnapshot } from './session/routineRunner';
 export { recommendNext, completedCount } from './session/recommend';
+export { HALPE } from './form/halpe';
+export type { Kp2, KpFrame } from './form/halpe';
+export { SQUAT_ENABLED, SQUAT_RULES, computeSquatRepMetrics, judgeSquat } from './form/squatRules';
+export type { FindingKind, FormFinding, SetNote, SquatJudgement, SquatRepMetrics } from './form/squatRules';

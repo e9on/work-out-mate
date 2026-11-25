@@ -1,4 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { setKey } from '../src/form/types';
+import { createMemoryMediaStore } from '../src/storage/memoryMediaStore';
 import { describe, expect, it, vi } from 'vitest';
 import type { SetLog, WorkoutSession } from '@wom/core';
 import { History } from '../src/screens/History';
@@ -65,5 +67,25 @@ describe('SessionDetail', () => {
   it('세션이 없으면 안내한다', async () => {
     render(<SessionDetail storage={createMemoryStorage()} sessionId="none" onBack={vi.fn()} />);
     expect(await screen.findByText('기록을 찾을 수 없어요')).toBeInTheDocument();
+  });
+
+  it('녹화한 세션이면 자세 분석 지적 줄과 ▶을 보이고, 누르면 onPlay(setKey, index)', async () => {
+    const storage = createMemoryStorage();
+    const reps = [{ index: 1, startT: 1000, bottomT: 1500, endT: 2000 }];
+    await storage.saveSession(mk('s', '하체데이', 5000, true, [log({ count: 1, reps })]));
+    const store = createMemoryMediaStore();
+    await store.putCaptureMeta({ sessionId: 's', videoEnabled: true, consentAgreed: false, consentVersion: null });
+    const key = setKey('s', 0, 0);
+    await store.putVideo({ key, sessionId: 's', routineId: 'r', exerciseIndex: 0, setIndex: 0, startedAt: 0, mimeType: 'video/webm', blob: new Blob([new Uint8Array(1)]), boxes: [] });
+    await store.putAnalysis({
+      key, sessionId: 's', status: 'done', reason: null,
+      metrics: [{ index: 1, bottomT: 1500, kneeDeg: 120, kneeAnkleRatio: 1.3, heelRise: 0, descentMs: 800, skipped: null }],
+      findings: [{ index: 1, kind: 'depth', value: 120 }], notes: [], uncertain: [], frames: [], model: 'rtmpose-m-halpe26', analyzedAt: 1,
+    });
+    const onPlay = vi.fn();
+    render(<SessionDetail storage={storage} sessionId="s" onBack={vi.fn()} mediaStore={store} onPlay={onPlay} />);
+    expect(await screen.findByRole('region', { name: '자세 분석' })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '1번째 다시 보기' }));
+    expect(onPlay).toHaveBeenCalledWith(key, 1);
   });
 });

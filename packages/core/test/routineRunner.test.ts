@@ -642,6 +642,40 @@ describe('RoutineRunner: 수정 1회차', () => {
     });
   });
 
+  describe('반복 시각 기록', () => {
+    it('기록된 SetLog.reps 시각은 toEpoch(프레임 시각)', () => {
+      const E = 5000;
+      const d = runner([sq(1, 2, 3)], (t) => E + t);
+      d.doSet('squat', 2);
+      const s = sessionOf(d.log);
+      const reps = s.sets[0]!.reps!;
+      expect(reps).toHaveLength(2);
+      expect(reps.map((x) => x.index)).toEqual([1, 2]);
+      for (const x of reps) {
+        expect(x.startT).toBeGreaterThanOrEqual(s.sets[0]!.startT);
+        expect(x.startT).toBeLessThan(x.bottomT);
+        expect(x.bottomT).toBeLessThan(x.endT);
+        expect(x.endT).toBeLessThanOrEqual(s.sets[0]!.endT);
+      }
+      // 프레임 시계 원본과 비교: SetRunner 결과의 reps에 E를 더한 값
+      const fin = d.log.find((x) => isSetFinished(x.ev))!.ev;
+      const raw = fin.type === 'set' && fin.event.type === 'finished' ? fin.event.result.reps! : [];
+      // 비교가 undefined끼리 맞아떨어지는 것을 막는다: 원본 반복은 모두 숫자 bottomSignal을 가진다
+      expect(raw.length).toBeGreaterThan(0);
+      expect(raw.every((x) => typeof x.bottomSignal === 'number')).toBe(true);
+      expect(reps).toEqual(raw.map((x) => ({ index: x.index, startT: E + x.startT, bottomT: E + x.bottomT, endT: E + x.endT, bottomSignal: x.bottomSignal })));
+    });
+
+    it('reps 필드가 없는 옛 세션 객체도 sessionSoFar·copy에서 깨지지 않는다', () => {
+      const d = runner([sq(1, 2, 3)], (t) => 1_000_000 + t);
+      d.doSet('squat', 2);
+      const s = d.rr.sessionSoFar(d.t);
+      delete (s.sets[0] as { reps?: unknown }).reps;
+      expect(() => structuredClone(s)).not.toThrow();
+      expect(d.rr.sessionSoFar(d.t).sets[0]!.reps).toHaveLength(2);
+    });
+  });
+
   describe('쉬는 시간의 다음 세트 정보', () => {
     it('스쿼트 → 푸시업 → 스쿼트: restStart.next, nextUp.exerciseIndex, SetLog.exerciseIndex', () => {
       const d = runner([sq(2, 2, 30), pu(1, 2, 30), sq(1, 2, 30)]);

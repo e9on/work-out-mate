@@ -9,6 +9,7 @@ import { CameraError, type PoseSource } from '../src/ports/pose';
 import type { Speech } from '../src/ports/speech';
 import type { Storage } from '../src/ports/storage';
 import { createMemoryStorage } from '../src/storage/memoryStorage';
+import type { SetCapture } from '../src/form/setCapture';
 
 const DT = 33;
 const EPOCH = 1_700_000_000_000;
@@ -699,5 +700,125 @@ describe('useWorkout', () => {
     expect(r.intervals.size).toBe(0);
     expect(r.pose.listeners).toBe(0);
     expect(r.keepAwake.off).toHaveBeenCalled();
+  });
+});
+
+describe('WorkoutEngine: 세트 녹화(capture)', () => {
+  function fakeCapture() {
+    const log: string[] = [];
+    const cap: SetCapture = {
+      beginSession: vi.fn(async (s) => {
+        log.push(`session:${s.sessionId}:${s.routineId}`);
+      }),
+      beginSet: vi.fn((ex: number, set: number) => {
+        log.push(`begin:${ex}:${set}`);
+      }),
+      addFrame: vi.fn(() => {
+        log.push('frame');
+      }),
+      endSet: vi.fn(async (keep?: boolean) => {
+        log.push(`end:${keep ?? true}`);
+        return null;
+      }),
+    };
+    return { cap, log };
+  }
+  const noFrames = (log: string[]) => log.filter((l) => l !== 'frame');
+
+  it('시작하면 beginSession을 한 번 부르고, 스쿼트 세트 start/finished에서 beginSet/endSet을 한 번씩 부른다', async () => {
+    const r = makeRig([sq(1, 2, 0)]);
+    const { cap, log } = fakeCapture();
+    const e = new WorkoutEngine({ ...r.deps, capture: cap });
+    r.attach(e);
+    await e.start(video());
+    expect(r.doSet(2)).toBe(true);
+    expect(noFrames(log)).toEqual(['session:s1:r1', 'begin:0:0', 'end:true']);
+    // 세트 중 프레임은 epoch ms(t + epochOffset)로 넘어간다
+    expect(vi.mocked(cap.addFrame).mock.calls.length).toBeGreaterThan(10);
+    const [f, epochT] = vi.mocked(cap.addFrame).mock.calls[0]!;
+    expect(epochT).toBe(f.t + EPOCH);
+    e.dispose();
+  });
+
+  it('세트가 열려 있지 않은 때(카운트다운 전·쉬는 시간)의 프레임은 넘기지 않는다', async () => {
+    const r = makeRig([sq(1, 2, 0)]);
+    const { cap, log } = fakeCapture();
+    const e = new WorkoutEngine({ ...r.deps, capture: cap });
+    await e.start(video());
+    r.frames(hold(175, 1000));
+    expect(log.filter((l) => l === 'frame')).toHaveLength(0);
+    e.dispose();
+  });
+
+  it('푸시업 세트는 capture를 부르지 않는다(beginSession 제외)', async () => {
+    const r = makeRig([pu(1, 2, 0)]);
+    const { cap, log } = fakeCapture();
+    const e = new WorkoutEngine({ ...r.deps, capture: cap });
+    r.attach(e);
+    await e.start(video());
+    e.skipExercise();
+    await flush();
+    expect(noFrames(log).filter((l) => l.startsWith('begin') || l.startsWith('end'))).toEqual([]);
+    expect(cap.beginSet).not.toHaveBeenCalled();
+    expect(cap.endSet).not.toHaveBeenCalled();
+    expect(cap.addFrame).not.toHaveBeenCalled();
+    e.dispose();
+  });
+
+  it('세트 끝 버튼으로 끝난 반복 0 세트는 endSet(false)로 저장하지 않는다', async () => {
+    const r = makeRig([sq(1, 5, 0)]);
+    const { cap, log } = fakeCapture();
+    const e = new WorkoutEngine({ ...r.deps, capture: cap });
+    r.attach(e);
+    await e.start(video());
+    r.frames([...hold(175, 1000), ...hold(175, 3500)], (ev) => ev.type === 'set' && ev.event.type === 'start');
+    expect(noFrames(log)).toContain('begin:0:0');
+    e.endSet();
+    await flush();
+    expect(noFrames(log).filter((l) => l.startsWith('end'))).toEqual(['end:false']);
+    e.dispose();
+  });
+
+  it('진행 중 세트에서 dispose하면 저장 없이 endSet(false)로 닫는다', async () => {
+    const r = makeRig([sq(1, 5, 0)]);
+    const { cap, log } = fakeCapture();
+    const e = new WorkoutEngine({ ...r.deps, capture: cap });
+    r.attach(e);
+    await e.start(video());
+    r.frames([...hold(175, 1000), ...hold(175, 3500)], (ev) => ev.type === 'set' && ev.event.type === 'start');
+    e.dispose();
+    expect(noFrames(log).filter((l) => l.startsWith('end'))).toEqual(['end:false']);
+  });
+
+  it('capture가 던지거나 reject해도 운동은 계속되고 경고만 남긴다', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const r = makeRig([sq(1, 2, 0)]);
+    const cap: SetCapture = {
+      beginSession: () => Promise.reject(new Error('a')),
+      beginSet: () => {
+        throw new Error('b');
+      },
+      addFrame: () => {
+        throw new Error('c');
+      },
+      endSet: () => Promise.reject(new Error('d')),
+    };
+    const e = new WorkoutEngine({ ...r.deps, capture: cap });
+    r.attach(e);
+    await e.start(video());
+    expect(r.doSet(2)).toBe(true);
+    await flush();
+    expect(r.last.cameraError).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    e.dispose();
+  });
+
+  it('capture가 없으면 지금과 똑같이 동작한다', async () => {
+    const r = makeRig([sq(1, 2, 0)]);
+    const e = new WorkoutEngine(r.deps);
+    r.attach(e);
+    await e.start(video());
+    expect(r.doSet(2)).toBe(true);
+    e.dispose();
   });
 });

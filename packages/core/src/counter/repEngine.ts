@@ -5,6 +5,11 @@ export type RepEvent = {
   endT: number;
   outMs: number;
   backMs: number;
+  /** 그 반복의 신호 최저점(원래 신호 단위). 'high' 운동은 최소값, 'low' 운동은 최대값 */
+  valley: number;
+  /** valley에 처음 닿은 시각(실제 최저점 시각). turnT는 반환선을 처음 지난 시각이라 하강 도중이다.
+   * countAt 'turn' 설정은 반환선에서 바로 확정하므로 turnT와 같다 */
+  valleyT: number;
 };
 
 export type RestSide = 'high' | 'low';
@@ -74,6 +79,7 @@ export class RepEngine {
   private turnT = 0;
   private peak = 0;
   private valley = 0;
+  private valleyT = 0;
   private pausedSince: number | null = null;
   private armed = false;
   private readonly sign: 1 | -1;
@@ -109,6 +115,7 @@ export class RepEngine {
     this.turnT = 0;
     this.peak = 0;
     this.valley = 0;
+    this.valleyT = 0;
     this.pausedSince = null;
     this.armed = false;
   }
@@ -152,6 +159,7 @@ export class RepEngine {
         if (s <= st.turnLine()) {
           this.turnT = t;
           this.valley = s;
+          this.valleyT = t;
           if (this.cfg.countAt === 'turn') {
             // 반환점 도달 즉시 확정. 최소 시간 미달이어도 재무장 전에는 새 반복을 시작하지 않는다.
             this.toRest(s, false);
@@ -164,7 +172,10 @@ export class RepEngine {
         }
         return null;
       case 'turned':
-        this.valley = Math.min(this.valley, s);
+        if (s < this.valley) {
+          this.valley = s;
+          this.valleyT = t;
+        }
         if (s <= st.completeLine(this.valley)) return null;
         this.toRest(s, true);
         return this.finish(t);
@@ -189,6 +200,9 @@ export class RepEngine {
       endT,
       outMs: this.turnT - this.startT,
       backMs: endT - this.turnT,
+      // 내부 valley는 부호를 곱한 값이므로 원래 단위로 되돌린다.
+      valley: this.valley * this.sign,
+      valleyT: this.valleyT,
     };
   }
 }

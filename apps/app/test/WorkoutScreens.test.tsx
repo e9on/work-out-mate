@@ -10,6 +10,8 @@ import { CameraErrorView } from '../src/screens/CameraErrorView';
 import { WorkoutFlow } from '../src/workout/WorkoutFlow';
 import { CameraError } from '../src/ports/pose';
 import { createMemoryStorage } from '../src/storage/memoryStorage';
+import { createMemoryMediaStore } from '../src/storage/memoryMediaStore';
+import { setKey } from '../src/form/types';
 import { FakePose, makeFakeWorkout } from './fakeWorkout';
 
 const ROUTINE: Routine = {
@@ -239,6 +241,20 @@ describe('Summary 화면', () => {
     fireEvent.click(screen.getByRole('button', { name: '홈으로' }));
     expect(onHome).toHaveBeenCalledTimes(1);
   });
+
+  it('mediaStore가 있으면 자세 분석 목록을 끼워 그리고 ▶은 onPlay를 부른다', async () => {
+    const store = createMemoryMediaStore();
+    await store.putCaptureMeta({ sessionId: 's1', videoEnabled: true, consentAgreed: false, consentVersion: null });
+    const key = setKey('s1', 0, 0);
+    await store.putAnalysis({
+      key, sessionId: 's1', status: 'done', reason: null, metrics: [],
+      findings: [{ index: 3, kind: 'heel', value: 0.4 }], notes: [], uncertain: [], frames: [], model: 'rtmpose-m-halpe26', analyzedAt: 1,
+    });
+    const onPlay = vi.fn();
+    render(<Summary session={session} onHome={vi.fn()} mediaStore={store} onPlay={onPlay} />);
+    fireEvent.click(await screen.findByRole('button', { name: '3번째 다시 보기' }));
+    expect(onPlay).toHaveBeenCalledWith(key, 3);
+  });
 });
 
 describe('카메라 오류', () => {
@@ -335,6 +351,21 @@ describe('WorkoutFlow: 화면 선택', () => {
     expect(container.querySelector('.rest .big-number')).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '건너뛰기' }));
     expect(screen.getByText('스쿼트 2/2세트')).toBeInTheDocument();
+  });
+
+  it('세트 화면에서는 분석 대기열을 busy로, 쉬는 시간에는 풀고, 화면을 떠나면 푼다', async () => {
+    const fw = makeFakeWorkout();
+    const queue = { enqueue: vi.fn(), resumePending: vi.fn(), setBusy: vi.fn(), onProgress: vi.fn(), dispose: vi.fn() };
+    const { unmount } = render(<WorkoutFlow routine={squat2} storage={createMemoryStorage()} analysisQueue={queue} onHome={vi.fn()} deps={fw.deps} />);
+    await flush();
+    expect(queue.setBusy).toHaveBeenLastCalledWith(true);
+    act(() => fw.doSquatSet(1));
+    expect(screen.getByText('다음: 스쿼트 2세트 1회')).toBeInTheDocument();
+    expect(queue.setBusy).toHaveBeenLastCalledWith(false);
+    fireEvent.click(screen.getByRole('button', { name: '건너뛰기' }));
+    expect(queue.setBusy).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(queue.setBusy).toHaveBeenLastCalledWith(false);
   });
 
   it('목표 전에 "세트 끝"을 누르면 Rest 화면으로 간다', async () => {

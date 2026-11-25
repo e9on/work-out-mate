@@ -19,10 +19,13 @@
     "@capacitor-community/keep-awake": "^8.0.1",
     "@capacitor-community/text-to-speech": "^8.0.2",
     "@capacitor/android": "^8.6.2",
+    "@capacitor/app": "^8.1.2",
     "@capacitor/core": "^8.6.2",
+    "@capacitor/filesystem": "^8.1.5",
     "@mediapipe/tasks-vision": "1.2",
     "@wom/core": "*",
     "idb": "^8.0.4",
+    "onnxruntime-web": "1.20.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

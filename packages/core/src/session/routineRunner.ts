@@ -381,6 +381,9 @@ export class RoutineRunner {
       // 저장 레코드는 toEpoch 시계 하나로 맞춘다. restTakenMs는 입력 시계 차이값(시계와 상관없음).
       startT: this.toEpoch(r.startT),
       endT: this.toEpoch(r.endT),
+      ...(r.reps
+        ? { reps: r.reps.map((x) => ({ ...x, startT: this.toEpoch(x.startT), bottomT: this.toEpoch(x.bottomT), endT: this.toEpoch(x.endT) })) }
+        : {}),
       exerciseIndex: this.pos.exerciseIndex,
       setIndex: this.pos.setIndex,
       restTakenMs: this.prevEndT === null ? null : r.startT - this.prevEndT,
@@ -463,7 +466,12 @@ export class RoutineRunner {
 }
 
 function copyLog(s: SetLog): SetLog {
-  return { ...s, target: { ...s.target }, negativeDescentMs: [...s.negativeDescentMs] };
+  return {
+    ...s,
+    target: { ...s.target },
+    negativeDescentMs: [...s.negativeDescentMs],
+    ...(s.reps ? { reps: s.reps.map((x) => ({ ...x })) } : {}),
+  };
 }
 
 function copySession(s: WorkoutSession): WorkoutSession {
