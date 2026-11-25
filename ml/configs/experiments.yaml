@@ -1,0 +1,76 @@
+# 단계별 실험 설정(Task 8, scripts/run_all.py가 읽는다).
+# 모든 값은 test 분할(test_ec3d·test_own)을 보지 않고 정했다. 근거는 각 줄 주석.
+# 바꾸면 이미 끝난 단계(runs/<stage>/seed<k>/done.json)는 그대로 건너뛰므로, 다시 돌리려면 그 폴더를 지운다.
+
+seeds: [0, 1, 2]          # 설계 4절: 시드 3개로 평균·편차
+data_seed: 0              # 증강 시드(모델 시드와 별개, Task 6과 같음)
+weights: weights/motionbert_lite.bin   # ml 폴더 기준. 없으면 mb_* 단계는 돌지 않는다(R18)
+# R17: Windows에서 VRAM이 넘치면 OOM 대신 공유 메모리로 넘쳐 극도로 느려진다 → 프로세스 상한을 건다.
+# 상한 = (시작 때 남은 VRAM(mem_get_info free) - 여유) / 전체 VRAM. 전체 기준 비율이 아니라 남은 메모리 기준이어야
+# 다른 프로그램·CUDA 컨텍스트가 쓰는 몫을 넘지 않는다. 넘치면 조용히 느려지는 대신 OOM 예외가 난다(배치는 줄이지 않음).
+vram_margin_gib: 0.5
+
+# 모든 학습 단계 공통(train.DEFAULT_CFG와 같은 값을 명시). 단계에서 덮어쓸 수 있다.
+common:
+  weight_decay: 1.0e-4    # Task 6 SmallGRU와 같은 값
+  max_epochs: 100         # 조기 종료(val)가 있는 스쿼트의 상한
+  patience: 15            # Task 6과 같음
+  min_delta: 1.0e-4
+  pos_weight: auto        # Task 6에서 val로 고른 값(R12)
+
+stages:
+  rules:
+    kind: rules           # 학습 없음. scripts/rules_baseline.py와 같은 계산 → runs/rules/metrics.json
+
+  small:                  # 방식 A: 운동마다 SmallGRU를 처음부터 학습(몸통+머리)
+    kind: small
+    hidden: 128           # Task 6 기본값
+    lr: 1.0e-3            # Task 6 기본값
+    batch_size: 64        # Task 6 기본값
+    exercises: [squat, lunge, plank]   # R19: 런지·플랭크도(mb_full_lunge_plank와 비교할 기준선)
+    # R9·R13: val에 런지·플랭크가 없으므로 고정 epoch. 10 = 스쿼트 val 최적 epoch(4·9·4, Task 6 수정 1회차 재학습) 근처 최대값
+    select: {squat: val, lunge: fixed, plank: fixed}
+    fixed_epochs: {lunge: 10, plank: 10}
+
+  mb_probe:               # 설계 ①: 몸통 전부 고정, 머리만
+    kind: mb
+    freeze: probe
+    exercises: [squat]
+    select: {squat: val}
+    # 근거: MotionBERT 업스트림 행동 인식 파인튜닝 설정(configs/action/MB_ft_NTU60_xsub.yaml) lr_head 0.001
+    lr: 1.0e-3
+    batch_size: 64        # probe는 배치 128에서도 1.8GB(task-7-report)
+
+  mb_partial:             # 설계 ②: 마지막 블록 몇 개 + norm·pre_logits(R16)
+    kind: mb
+    freeze: partial
+    partial_blocks: 2     # Lite depth 5 중 뒤 2개(Task 7에서 VRAM 잰 값)
+    init_from: mb_probe   # 시드별 probe 체크포인트(머리)에서 시작
+    exercises: [squat]
+    select: {squat: val}
+    # 근거: 업스트림 lr_backbone 0.0001. R16: partial은 몸통·머리 같은 학습률.
+    # 머리는 probe에서 이미 학습됐으므로 처음 학습률(1e-3)보다 낮은 1e-4로 이어 간다.
+    lr: 1.0e-4
+    batch_size: 32        # R17: partial 32 이하(32에서 5.18GB)
+
+  mb_full:                # 설계 ③: 전체를 작은 학습률로
+    kind: mb
+    freeze: full
+    init_from: mb_partial # 시드별 partial 체크포인트에서 시작
+    exercises: [squat]
+    select: {squat: val}
+    lr: 1.0e-4            # 머리 학습률(partial과 같음)
+    body_lr_ratio: 0.1    # 몸통 = 머리 × 0.1 = 1e-5 (설계 ③, Task 7 BACKBONE_LR_RATIO). 빠지면 run_all이 예외
+    batch_size: 12        # R21: 16에서 실제 학습 중 OOM(2026-11-25, 상한 6.41GiB) → 12로 재실행. R17: full 16 이하
+
+  mb_full_lunge_plank:    # mb_full(시드별) 몸통 고정, 런지·플랭크 머리만 EC3D 피험자 1~3으로
+    kind: mb
+    freeze: probe
+    init_from: mb_full
+    exercises: [lunge, plank]
+    select: {lunge: fixed, plank: fixed}
+    lr: 1.0e-3            # mb_probe와 같은 학습 방식(고정 몸통 + 선형 머리)
+    batch_size: 64
+    # R9: val이 없으므로 고정 epoch. R13과 같은 방식으로, 같은 학습 방식(고정 몸통+선형 머리, lr·배치 같음)인
+    # mb_probe 스쿼트의 val 최적 epoch 중 시드 최대값을 실행 때 읽어 쓴다(val만 근거, 모든 시드 공통 상수).
+    fixed_epochs: {lunge: from_mb_probe, plank: from_mb_probe}

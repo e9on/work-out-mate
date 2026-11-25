@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:lan": "vite --mode lan",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/strip-private.mjs",
     "typecheck": "tsc --noEmit",
     "copy-wasm": "node scripts/copy-wasm.mjs",
     "android:build": "npm run build && npx cap sync android",

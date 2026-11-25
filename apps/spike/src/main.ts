@@ -3,7 +3,7 @@ import { createTracker, EXERCISES, type ExerciseId, type TrackerState } from '@w
 import { createLandmarker, detect, drawPose, type Delegate, type Landmarker, type ModelName } from './pose';
 import { Capacitor } from '@capacitor/core';
 import { KeepAwake } from '@capacitor-community/keep-awake';
-import { Recorder, downloadRecording, isNativeApp, saveRecordingNative, sendRecordingToPc } from './recorder';
+import { Recorder, VideoRecorder, downloadBlob, downloadRecording, isNativeApp, recordingFileName, saveRecordingNative, saveVideoNative, sendRecordingToPc } from './recorder';
 import { Hud, Stat } from './hud';
 import { listNativeVoices, listVoices, onVoicesChanged, speak } from './speech';
 
@@ -52,6 +52,7 @@ let lastT = 0;
 const inferMs = new Stat(120);
 const doneTimes: number[] = []; // 최근 1초 처리 프레임 시각
 const recorder = new Recorder();
+const videoRec = new VideoRecorder();
 let voices = listVoices();
 
 async function rebuild(): Promise<void> {
@@ -221,21 +222,34 @@ let recMeta: { exercise: ExerciseId; model: ModelName } | null = null;
 
 function stopRecording(): void {
   if (!recMeta) return;
-  const file = recorder.stop(recMeta.exercise, recMeta.model);
+  const base = recorder.stop(recMeta.exercise, recMeta.model);
   recMeta = null;
   recBtn.textContent = '녹화 시작';
-  if (file.frames.length === 0) {
+  const videoPromise = videoRec.stop();
+  if (base.frames.length === 0) {
     note = '녹화된 프레임이 없어 저장하지 않음';
     return;
   }
+  // 영상 파일 이름과 시작 시각(프레임 t와 같은 performance.now 시계)을 JSON에 함께 남긴다.
+  const name = recordingFileName(base);
+  const videoName = name.replace(/\.json$/, `.${videoRec.extension}`);
+  const file = { ...base, video: { file: videoName, startT: videoRec.startT, mimeType: videoRec.mimeType } };
   if (isNativeApp) {
-    note = `폰에 저장하는 중... (${file.frames.length}프레임)`;
-    saveRecordingNative(file).then(
-      (where) => { note = `폰에 저장: ${where} (${file.frames.length}프레임)`; refreshHud(); },
-      (e) => { note = `저장 실패: ${e instanceof Error ? e.message : String(e)}`; refreshHud(); },
-    );
+    note = `폰에 저장하는 중... (${file.frames.length}프레임 + 영상)`;
+    void (async () => {
+      try {
+        const where = await saveRecordingNative(file, name);
+        const blob = await videoPromise;
+        const vwhere = blob ? await saveVideoNative(blob, videoName) : '영상 없음';
+        note = `폰에 저장: ${where} / 영상 ${vwhere} (${file.frames.length}프레임)`;
+      } catch (e) {
+        note = `저장 실패: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      refreshHud();
+    })();
     return;
   }
+  void videoPromise.then((blob) => { if (blob) downloadBlob(blob, videoName); });
   if (window.wom?.isElectron) {
     // PC 앱(Electron): 개발 서버가 없으므로 바로 다운로드. main이 문서/WorkOutMate 에 저장하고 경로를 알려 준다.
     const name = downloadRecording(file);
@@ -260,6 +274,11 @@ recBtn.onclick = () => {
   } else {
     recMeta = { exercise: exerciseSel.value as ExerciseId, model: modelSel.value as ModelName };
     recorder.start();
+    try {
+      videoRec.start(video.srcObject as MediaStream);
+    } catch (e) {
+      note = `영상 녹화 실패(랜드마크만 저장): ${e instanceof Error ? e.message : String(e)}`;
+    }
     recBtn.textContent = '녹화 정지 및 저장';
   }
   refreshHud();
