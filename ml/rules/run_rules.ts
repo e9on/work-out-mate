@@ -6,14 +6,14 @@
  *   녹화 한 개 = 세트 하나(서 있을 때 기준값을 세트 전체 프레임으로 구하므로 앱과 같은 방식).
  *   mediapipe는 33점(화소 좌표, score=visibility), halpe는 26점.
  * 출력 JSON: { sets: [{ file, reps: [{ index, kneeIn: 0|1, shallow: 0|1, skipped: null|"noPerson"|"oneLeg" }] }] }
- *   kneeIn = judge의 kneeIn 또는 kneeInRelative, shallow = depth.
+ *   kneeIn = judge의 kneeIn 또는 kneeInRelative, shallow = 실험 당시 앱의 깊이 지적(2D 무릎 각도 > depthMaxKneeDeg).
  *
  * 실행: npx esbuild ml/rules/run_rules.ts --bundle --platform=node --outfile=ml/runs/rules/run_rules.cjs
  *       node ml/runs/rules/run_rules.cjs <in.json> <out.json>
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { HALPE, type Kp2, type KpFrame } from '../../packages/core/src/form/halpe';
-import { computeSquatRepMetrics, judgeSquat } from '../../packages/core/src/form/squatRules';
+import { SQUAT_RULES, computeSquatRepMetrics, judgeSquat } from '../../packages/core/src/form/squatRules';
 import type { RepTiming } from '../../packages/core/src/session/model';
 
 type RawFrame = { t: number; kps: number[][] | null };
@@ -51,7 +51,9 @@ const sets = input.sets.map((s) => {
     reps: metrics.map((m) => ({
       index: m.index,
       kneeIn: has(m.index, ['kneeIn', 'kneeInRelative']),
-      shallow: has(m.index, ['depth']),
+      // 앱은 2026-11-25부터 깊이를 반복 지적이 아닌 3D 세트 조언으로 바꿨다(이 입력엔 3D 값이 없음).
+      // 실험 기준선은 실험 당시 앱 판정(2D 바닥 무릎 각도 > depthMaxKneeDeg면 깊이 지적)을 그대로 재현한다.
+      shallow: !m.skipped && m.kneeDeg !== null && m.kneeDeg > SQUAT_RULES.depthMaxKneeDeg ? 1 : 0,
       skipped: m.skipped,
     })),
   };
